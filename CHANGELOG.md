@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-04-25
+
+### Added
+- **`/model` opens a Pro/Flash + thinking-effort picker (#39).** Typing `/model` with no argument now pops a two-pane modal: model on the left (`deepseek-v4-pro` flagship, `deepseek-v4-flash` fast/cheap, plus a "current (custom)" row when the active id isn't one of the listed defaults), and thinking effort on the right. Tab/←/→ swaps panes, ↑/↓ moves within the focused pane, Enter applies both selections, Esc cancels. The effort pane intentionally exposes only **Off / High / Max** because [DeepSeek's Thinking Mode docs](https://api-docs.deepseek.com/guides/reasoning_model) state `low`/`medium` are mapped to `high` server-side and `xhigh` is mapped to `max` — the legacy variants stay valid in `~/.deepseek/settings.toml` for back-compat, the picker just doesn't surface them. Apply path persists `default_model` and `reasoning_effort` to settings, forwards `Op::SetModel` + `Op::SetCompaction` to the running engine so the next turn picks up the change without a restart, and resets the per-turn token gauges (cache, replay) so the footer numbers reflect the new model. `/model <id>` keeps working unchanged for power users.
+
 ## [0.5.1] - 2026-04-25
 
 ### Added
