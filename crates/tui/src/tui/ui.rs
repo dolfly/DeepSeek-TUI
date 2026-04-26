@@ -88,7 +88,13 @@ use super::widgets::{
 
 // === Constants ===
 
-const SLASH_MENU_LIMIT: usize = 6;
+/// Upper bound on slash-menu entries returned to the renderer. The composer's
+/// render path already paginates with center-tracking (see
+/// `widgets::ComposerWidget::render`), so this only needs to be high enough to
+/// encompass the full filtered command list — never the visible-row budget.
+/// Bumped from 6 to 128 to fix #64 (selection couldn't reach commands beyond
+/// the visible window because the source list itself was capped).
+const SLASH_MENU_LIMIT: usize = 128;
 const MENTION_MENU_LIMIT: usize = 6;
 const MIN_CHAT_HEIGHT: u16 = 3;
 const MIN_COMPOSER_HEIGHT: u16 = 2;
@@ -1152,7 +1158,7 @@ async fn run_event_loop(
                 continue;
             }
 
-            let slash_menu_entries = visible_slash_menu_entries(app, 6);
+            let slash_menu_entries = visible_slash_menu_entries(app, SLASH_MENU_LIMIT);
             let slash_menu_open = !slash_menu_entries.is_empty();
             if slash_menu_open && app.slash_menu_selected >= slash_menu_entries.len() {
                 app.slash_menu_selected = slash_menu_entries.len().saturating_sub(1);
