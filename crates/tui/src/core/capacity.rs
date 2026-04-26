@@ -29,14 +29,24 @@ impl Default for CapacityControllerConfig {
 
         Self {
             enabled: true,
-            low_risk_max: 0.34,
+            // Tuning history (#63 follow-up): the previous defaults
+            // (low_risk_max=0.34, refresh_cooldown_turns=2, min_turns=2)
+            // fired `TargetedContextRefresh` every couple of turns whenever
+            // p_fail crept above 0.34. Each refresh runs `compact_messages_safe`
+            // which rewrites the conversation history — visually that looked
+            // like the agent "restarting" mid-session. Bumping the floor to
+            // 0.50 (still well below the medium ceiling of 0.62) and
+            // lengthening the cooldown to 6 turns reduces interventions
+            // ~3-4x without disabling the controller; it keeps firing on
+            // genuine risk while ignoring routine noise.
+            low_risk_max: 0.50,
             medium_risk_max: 0.62,
             severe_min_slack: -0.25,
             severe_violation_ratio: 0.40,
-            refresh_cooldown_turns: 2,
+            refresh_cooldown_turns: 6,
             replan_cooldown_turns: 5,
             max_replay_per_turn: 1,
-            min_turns_before_guardrail: 2,
+            min_turns_before_guardrail: 4,
             profile_window: 8,
             model_priors,
             fallback_default: 3.8,

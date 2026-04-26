@@ -6,11 +6,12 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures_util::future::join_all;
 use serde_json::{Value, json};
+use tokio::time::timeout;
 use tracing::debug;
 
 use crate::client::DeepSeekClient;
@@ -27,6 +28,10 @@ const DEFAULT_CHILD_MODEL: &str = "deepseek-v4-flash";
 const DEFAULT_MAX_TOKENS: u32 = 4096;
 /// Hard cap on parallel children — protects against runaway fan-out.
 const MAX_PARALLEL: usize = 16;
+/// Per-child timeout — each child request must complete within this window
+/// or it is treated as a timed-out error. Protects the fan-out from hanging
+/// indefinitely when a single API request stalls.
+const DEFAULT_CHILD_TIMEOUT: Duration = Duration::from_secs(120);
 
 // ---------------------------------------------------------------------------
 // RlmChildClient — dyn-compatible wrapper around LLM completion.
@@ -232,7 +237,7 @@ impl ToolSpec for RlmQueryTool {
                     temperature: Some(0.4),
                     top_p: Some(0.9),
                 };
-                let response = client.complete(request).await;
+                let response = timeout(DEFAULT_CHILD_TIMEOUT, client.complete(request)).await;
                 let elapsed_ms = started.elapsed().as_millis() as u64;
                 in_flight.fetch_sub(1, Ordering::Relaxed);
                 debug!(
@@ -260,9 +265,16 @@ impl ToolSpec for RlmQueryTool {
 
         let mut ordered: Vec<(usize, String)> = results
             .into_iter()
-            .map(|(idx, res)| match res {
-                Ok(response) => (idx, extract_text(&response.content)),
-                Err(e) => (idx, format!("[error: {e}]")),
+            .map(|(idx, res)| {
+                let text = match res {
+                    Ok(Ok(response)) => extract_text(&response.content),
+                    Ok(Err(e)) => format!("[error: {e}]"),
+                    Err(_) => format!(
+                        "[error: timed out after {}s]",
+                        DEFAULT_CHILD_TIMEOUT.as_secs()
+                    ),
+                };
+                (idx, text)
             })
             .collect();
         ordered.sort_by_key(|(idx, _)| *idx);

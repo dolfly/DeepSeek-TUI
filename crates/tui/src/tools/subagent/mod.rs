@@ -35,8 +35,12 @@ use crate::tools::todo::{SharedTodoList, TodoList};
 
 // === Constants ===
 
-const DEFAULT_MAX_STEPS: u32 = 20;
+const DEFAULT_MAX_STEPS: u32 = 100;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Per-step LLM API call timeout. Each `create_message` request must complete
+/// within this window or the step is treated as timed out. Prevents a single
+/// stuck API call from blocking the sub-agent indefinitely.
+const STEP_API_TIMEOUT: Duration = Duration::from_secs(120);
 const RESULT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const DEFAULT_RESULT_TIMEOUT_MS: u64 = 30_000;
 const MIN_WAIT_TIMEOUT_MS: u64 = 10_000;
@@ -2398,7 +2402,9 @@ async fn run_subagent(
             top_p: None,
         };
 
-        let response = runtime.client.create_message(request).await?;
+        let response = tokio::time::timeout(STEP_API_TIMEOUT, runtime.client.create_message(request))
+            .await
+            .map_err(|_| anyhow!("API call timed out after {}s", STEP_API_TIMEOUT.as_secs()))??;
 
         let mut tool_uses = Vec::new();
         for block in &response.content {
