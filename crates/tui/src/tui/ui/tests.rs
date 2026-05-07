@@ -3483,26 +3483,16 @@ fn completed_turn_notification_falls_back_to_latest_assistant_message() {
         }],
     });
 
-    let msg = super::completed_turn_notification_message(
-        &app,
-        "",
-        false,
-        Duration::from_secs(75),
-        None,
-    );
+    let msg =
+        super::completed_turn_notification_message(&app, "", false, Duration::from_secs(75), None);
     assert_eq!(msg, "Latest reply");
 }
 
 #[test]
 fn completed_turn_notification_falls_back_to_default_when_empty() {
     let app = create_test_app();
-    let msg = super::completed_turn_notification_message(
-        &app,
-        "",
-        false,
-        Duration::from_secs(5),
-        None,
-    );
+    let msg =
+        super::completed_turn_notification_message(&app, "", false, Duration::from_secs(5), None);
     assert_eq!(msg, "deepseek: turn complete");
 }
 
