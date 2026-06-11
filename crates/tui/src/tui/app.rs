@@ -1157,6 +1157,11 @@ pub struct SidebarHoverRow {
     pub detail: Option<String>,
     /// Whether the compact row lost information.
     pub is_truncated: bool,
+    /// Slash command to execute when this row is clicked (#3028).
+    /// `shell_*` job ids route through `/jobs` (e.g. `/jobs cancel
+    /// shell_abc123`); task-manager ids route through `/task` (e.g.
+    /// `/task show task_abc123`).
+    pub click_action: Option<String>,
 }
 
 /// Per-section metadata for sidebar hover detection.
