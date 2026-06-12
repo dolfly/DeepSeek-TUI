@@ -23,64 +23,63 @@ use super::{DeepSeekClient, ERROR_BODY_MAX_BYTES, bounded_error_text, system_to_
 /// Base URL path for the Codex Responses endpoint.
 const CODEX_RESPONSES_PATH: &str = "/codex/responses";
 
-impl DeepSeekClient {
-    /// Build the Responses API request body from a `MessageRequest`.
-    fn build_responses_body(&self, request: &MessageRequest) -> Value {
-        let model = &request.model;
-        let mut body = json!({
-            "model": model,
-            "stream": true,
-            "store": false,
-        });
+/// Build the Responses API request body from a `MessageRequest`.
+fn build_responses_body(request: &MessageRequest) -> Value {
+    let model = &request.model;
+    let mut body = json!({
+        "model": model,
+        "stream": true,
+        "store": false,
+    });
 
-        // Instructions (system prompt). The Codex Responses backend rejects
-        // requests without instructions, so fall back to a minimal system
-        // prompt when the caller did not supply one.
-        let instructions = system_to_instructions(request.system.clone())
-            .filter(|text| !text.trim().is_empty())
-            .unwrap_or_else(|| "You are a helpful assistant.".to_string());
-        body["instructions"] = json!(instructions);
+    // Instructions (system prompt). The Codex Responses backend rejects
+    // requests without instructions, so fall back to a minimal system
+    // prompt when the caller did not supply one.
+    let instructions = system_to_instructions(request.system.clone())
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or_else(|| "You are a helpful assistant.".to_string());
+    body["instructions"] = json!(instructions);
 
-        // Convert messages to Responses input items.
-        let input = convert_messages_to_responses_input(request);
-        body["input"] = json!(input);
+    // Convert messages to Responses input items.
+    let input = convert_messages_to_responses_input(request);
+    body["input"] = json!(input);
 
-        // Convert tools to Responses function tools.
-        if let Some(tools) = request.tools.as_ref() {
-            let responses_tools: Vec<Value> =
-                tools.iter().map(tool_to_responses_function).collect();
-            if !responses_tools.is_empty() {
-                body["tools"] = json!(responses_tools);
-                body["tool_choice"] = json!("auto");
-                body["parallel_tool_calls"] = json!(true);
-            }
+    // Convert tools to Responses function tools.
+    if let Some(tools) = request.tools.as_ref() {
+        let responses_tools: Vec<Value> = tools.iter().map(tool_to_responses_function).collect();
+        if !responses_tools.is_empty() {
+            body["tools"] = json!(responses_tools);
+            body["tool_choice"] = json!("auto");
+            body["parallel_tool_calls"] = json!(true);
         }
-
-        // Reasoning configuration. The Codex Responses backend accepts
-        // low/medium/high/xhigh, so provider-aware callers normalize inherited
-        // DeepSeek-only values before request construction: "off" becomes
-        // "low", and CodeWhale's "auto" falls back to "medium".
-        if let Some(raw) = request.reasoning_effort.as_deref()
-            && let Some(effort) = codex_responses_reasoning_effort(raw)
-        {
-            body["reasoning"] = json!({
-                "effort": effort,
-                "summary": "auto",
-            });
-        }
-
-        // Include reasoning summaries in the stream.
-        body["include"] = json!(["reasoning.encrypted_content"]);
-
-        body
     }
 
+    // Reasoning configuration. The Codex Responses backend accepts
+    // low/medium/high/xhigh, so provider-aware callers normalize inherited
+    // DeepSeek-only values before request construction: "off" becomes
+    // "low", and CodeWhale's "auto" falls back to "medium".
+    if let Some(raw) = request.reasoning_effort.as_deref()
+        && let Some(effort) = codex_responses_reasoning_effort(raw)
+    {
+        body["reasoning"] = json!({
+            "effort": effort,
+            "summary": "auto",
+        });
+    }
+
+    // Include reasoning summaries in the stream.
+    body["include"] = json!(["reasoning.encrypted_content"]);
+
+    body
+}
+
+impl DeepSeekClient {
     /// Handle a streaming Responses API request for the OpenAI Codex provider.
     pub(super) async fn handle_responses_stream(
         &self,
         request: MessageRequest,
     ) -> Result<StreamEventBox> {
-        let body = self.build_responses_body(&request);
+        let body = build_responses_body(&request);
         let url = format!("{}{}", self.base_url, CODEX_RESPONSES_PATH);
 
         // The bearer Authorization header is already installed as a default
@@ -614,7 +613,7 @@ fn tool_to_responses_function(tool: &Tool) -> Value {
 fn codex_responses_reasoning_effort(raw: &str) -> Option<&'static str> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "off" | "disabled" | "none" | "false" => Some("low"),
-        "minimal" => Some("minimal"),
+        "minimal" => Some("low"),
         "low" => Some("low"),
         "high" => Some("high"),
         "xhigh" | "max" | "maximum" => Some("xhigh"),
@@ -661,6 +660,7 @@ fn parse_responses_usage(val: &Value) -> Usage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::models::Message;
 
     #[test]
@@ -670,8 +670,46 @@ mod tests {
         assert_eq!(codex_responses_reasoning_effort("xhigh"), Some("xhigh"));
         assert_eq!(codex_responses_reasoning_effort("high"), Some("high"));
         assert_eq!(codex_responses_reasoning_effort("medium"), Some("medium"));
+        assert_eq!(codex_responses_reasoning_effort("minimal"), Some("low"));
         assert_eq!(codex_responses_reasoning_effort("auto"), Some("medium"));
         assert_eq!(codex_responses_reasoning_effort("off"), Some("low"));
+    }
+
+    #[test]
+    fn codex_responses_body_uses_responses_reasoning_not_deepseek_thinking() {
+        let request = MessageRequest {
+            model: "gpt-5.5".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: vec![ContentBlock::Text {
+                    text: "hello".to_string(),
+                    cache_control: None,
+                }],
+            }],
+            max_tokens: 128,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            metadata: None,
+            thinking: None,
+            reasoning_effort: Some("max".to_string()),
+            stream: None,
+            temperature: None,
+            top_p: None,
+        };
+
+        let body = build_responses_body(&request);
+
+        assert_eq!(
+            body.pointer("/reasoning/effort").and_then(Value::as_str),
+            Some("xhigh")
+        );
+        assert_eq!(
+            body.pointer("/reasoning/summary").and_then(Value::as_str),
+            Some("auto")
+        );
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("reasoning_effort").is_none());
     }
 
     #[test]

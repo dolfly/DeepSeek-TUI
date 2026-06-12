@@ -90,7 +90,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `low`/`medium`/`high`/`xhigh` tiers. Startup, `/config`, and the model
   picker now display Codex labels instead of leaking DeepSeek
   `off`/`max` names, while Codex still reports as a Responses payload
-  provider.
+  provider. The Responses request builder also clamps legacy `minimal` input
+  to `low` and has regression coverage that Codex requests use
+  `reasoning.effort`, not DeepSeek `thinking` fields.
 - **OpenAI Codex context metadata (#3070).** The `gpt-5.5` default and
   CodeWhale aliases now use OpenAI's documented 1,050,000-token context window
   and 128,000 max-output metadata for context pressure, prompts, and doctor
