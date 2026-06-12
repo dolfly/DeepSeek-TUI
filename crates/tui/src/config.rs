@@ -5805,17 +5805,45 @@ fn refresh_kimi_oauth_token(refresh_token: &str) -> Result<KimiOAuthCredential> 
 }
 
 fn kimi_cli_oauth_credentials_path() -> Result<PathBuf> {
-    let share_dir = std::env::var("KIMI_SHARE_DIR")
+    if let Some(kimi_code_home) = kimi_code_home_override() {
+        return Ok(kimi_oauth_credential_path(kimi_code_home));
+    }
+
+    let modern_path = effective_home_dir()
+        .map(|home| kimi_oauth_credential_path(home.join(".kimi-code")))
+        .context("Failed to resolve Kimi Code home directory")?;
+    if modern_path.exists() {
+        return Ok(modern_path);
+    }
+
+    if let Some(legacy_share_dir) = kimi_legacy_share_dir_override() {
+        return Ok(kimi_oauth_credential_path(legacy_share_dir));
+    }
+
+    if let Some(legacy_path) = effective_home_dir()
+        .map(|home| kimi_oauth_credential_path(home.join(".kimi")))
+        .filter(|path| path.exists())
+    {
+        return Ok(legacy_path);
+    }
+
+    Ok(modern_path)
+}
+
+fn kimi_code_home_override() -> Option<PathBuf> {
+    std::env::var_os("KIMI_CODE_HOME")
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|_| {
-            effective_home_dir()
-                .map(|home| home.join(".kimi"))
-                .ok_or(std::env::VarError::NotPresent)
-        })
-        .context("Failed to resolve Kimi share directory")?;
-    Ok(share_dir
-        .join("credentials")
-        .join(KIMI_CODE_CREDENTIAL_FILE))
+}
+
+fn kimi_legacy_share_dir_override() -> Option<PathBuf> {
+    std::env::var_os("KIMI_SHARE_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn kimi_oauth_credential_path(home: PathBuf) -> PathBuf {
+    home.join("credentials").join(KIMI_CODE_CREDENTIAL_FILE)
 }
 
 fn write_kimi_oauth_credential(path: &Path, credential: &KimiOAuthCredential) -> Result<()> {
@@ -6488,6 +6516,7 @@ action = "session.compact"
         kimi_base_url: Option<OsString>,
         kimi_model: Option<OsString>,
         kimi_model_name: Option<OsString>,
+        kimi_code_home: Option<OsString>,
         kimi_share_dir: Option<OsString>,
         kimi_code_oauth_host: Option<OsString>,
         kimi_oauth_host: Option<OsString>,
@@ -6591,6 +6620,7 @@ action = "session.compact"
             let kimi_base_url_prev = env::var_os("KIMI_BASE_URL");
             let kimi_model_prev = env::var_os("KIMI_MODEL");
             let kimi_model_name_prev = env::var_os("KIMI_MODEL_NAME");
+            let kimi_code_home_prev = env::var_os("KIMI_CODE_HOME");
             let kimi_share_dir_prev = env::var_os("KIMI_SHARE_DIR");
             let kimi_code_oauth_host_prev = env::var_os("KIMI_CODE_OAUTH_HOST");
             let kimi_oauth_host_prev = env::var_os("KIMI_OAUTH_HOST");
@@ -6689,6 +6719,7 @@ action = "session.compact"
                 env::remove_var("KIMI_BASE_URL");
                 env::remove_var("KIMI_MODEL");
                 env::remove_var("KIMI_MODEL_NAME");
+                env::remove_var("KIMI_CODE_HOME");
                 env::remove_var("KIMI_SHARE_DIR");
                 env::remove_var("KIMI_CODE_OAUTH_HOST");
                 env::remove_var("KIMI_OAUTH_HOST");
@@ -6787,6 +6818,7 @@ action = "session.compact"
                 kimi_base_url: kimi_base_url_prev,
                 kimi_model: kimi_model_prev,
                 kimi_model_name: kimi_model_name_prev,
+                kimi_code_home: kimi_code_home_prev,
                 kimi_share_dir: kimi_share_dir_prev,
                 kimi_code_oauth_host: kimi_code_oauth_host_prev,
                 kimi_oauth_host: kimi_oauth_host_prev,
@@ -6909,6 +6941,7 @@ action = "session.compact"
                 Self::restore_var("KIMI_BASE_URL", self.kimi_base_url.take());
                 Self::restore_var("KIMI_MODEL", self.kimi_model.take());
                 Self::restore_var("KIMI_MODEL_NAME", self.kimi_model_name.take());
+                Self::restore_var("KIMI_CODE_HOME", self.kimi_code_home.take());
                 Self::restore_var("KIMI_SHARE_DIR", self.kimi_share_dir.take());
                 Self::restore_var("KIMI_CODE_OAUTH_HOST", self.kimi_code_oauth_host.take());
                 Self::restore_var("KIMI_OAUTH_HOST", self.kimi_oauth_host.take());
@@ -10283,7 +10316,65 @@ api_key = "novita-table-key"
     }
 
     #[test]
-    fn moonshot_kimi_oauth_reads_fresh_cli_credential() -> Result<()> {
+    fn moonshot_kimi_oauth_reads_kimi_code_home_credential() -> Result<()> {
+        let _lock = lock_test_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_root = env::temp_dir().join(format!(
+            "codewhale-tui-kimi-code-oauth-key-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&temp_root)?;
+        let _guard = EnvGuard::new(&temp_root);
+
+        let kimi_code_home = temp_root.join(".kimi-code");
+        let credential_dir = kimi_code_home.join("credentials");
+        fs::create_dir_all(&credential_dir)?;
+        unsafe { env::set_var("KIMI_CODE_HOME", &kimi_code_home) };
+
+        let expires_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64()
+            + 3600.0;
+        let credential = json!({
+            "access_token": "fresh-kimi-code-oauth-token",
+            "refresh_token": "refresh-token",
+            "expires_at": expires_at,
+            "scope": "openid profile email",
+            "token_type": "Bearer",
+        });
+        fs::write(
+            credential_dir.join(KIMI_CODE_CREDENTIAL_FILE),
+            serde_json::to_string(&credential)?,
+        )?;
+
+        let config_path = temp_root.join(".deepseek").join("config.toml");
+        ensure_parent_dir(&config_path)?;
+        fs::write(
+            &config_path,
+            r#"provider = "moonshot"
+
+[providers.moonshot]
+auth_mode = "kimi_oauth"
+api_key = "stale-api-key"
+"#,
+        )?;
+
+        let config = Config::load(None, None)?;
+        assert_eq!(config.api_provider(), ApiProvider::Moonshot);
+        assert_eq!(config.deepseek_base_url(), DEFAULT_KIMI_CODE_BASE_URL);
+        assert_eq!(config.default_model(), DEFAULT_KIMI_CODE_MODEL);
+        assert_eq!(config.deepseek_api_key()?, "fresh-kimi-code-oauth-token");
+        assert!(has_api_key_for(&config, ApiProvider::Moonshot));
+        Ok(())
+    }
+
+    #[test]
+    fn moonshot_kimi_oauth_falls_back_to_legacy_share_dir_credential() -> Result<()> {
         let _lock = lock_test_env();
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)

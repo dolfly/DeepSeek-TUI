@@ -400,7 +400,7 @@ max_subagents = 10 # optional (1-20)
 # # Kimi Code path:
 # # base_url = "https://api.kimi.com/coding/v1"
 # # model = "kimi-for-coding"
-# # auth_mode = "kimi_oauth"                   # reads Kimi CLI OAuth credentials
+# # auth_mode = "kimi_oauth"                   # reads Kimi Code OAuth credentials
 
 # Self-hosted SGLang OpenAI-compatible server
 [providers.sglang]
