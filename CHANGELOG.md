@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   patch, run, find, delegate, fanout, RLM, verify, think, and generic tool
   work now route through the shipped locale tables. Thanks @gordonlu for the
   PR.
+- **Localized config section labels (#2918).** The interactive config view now
+  localizes section and session/saved scope labels while preserving English
+  search terms. Thanks @gordonlu for the PR.
 
 ### Fixed
 

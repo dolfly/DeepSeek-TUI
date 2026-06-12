@@ -367,11 +367,14 @@ enum ConfigScope {
 }
 
 impl ConfigScope {
-    fn label(self) -> &'static str {
-        match self {
-            ConfigScope::Session => "SESSION",
-            ConfigScope::Saved => "SAVED",
-        }
+    fn label(self, locale: Locale) -> &'static str {
+        tr(
+            locale,
+            match self {
+                ConfigScope::Session => MessageId::ConfigScopeSession,
+                ConfigScope::Saved => MessageId::ConfigScopeSaved,
+            },
+        )
     }
 
     fn persist(self) -> bool {
@@ -402,18 +405,21 @@ enum ConfigSection {
 }
 
 impl ConfigSection {
-    fn label(self) -> &'static str {
-        match self {
-            ConfigSection::Provider => "Provider",
-            ConfigSection::Model => "Model",
-            ConfigSection::Permissions => "Permissions",
-            ConfigSection::Network => "Network",
-            ConfigSection::Display => "Display",
-            ConfigSection::Composer => "Composer",
-            ConfigSection::Sidebar => "Sidebar",
-            ConfigSection::History => "History",
-            ConfigSection::Mcp => "MCP",
-        }
+    fn label(self, locale: Locale) -> &'static str {
+        tr(
+            locale,
+            match self {
+                ConfigSection::Provider => MessageId::ConfigSectionProvider,
+                ConfigSection::Model => MessageId::ConfigSectionModel,
+                ConfigSection::Permissions => MessageId::ConfigSectionPermissions,
+                ConfigSection::Network => MessageId::ConfigSectionNetwork,
+                ConfigSection::Display => MessageId::ConfigSectionDisplay,
+                ConfigSection::Composer => MessageId::ConfigSectionComposer,
+                ConfigSection::Sidebar => MessageId::ConfigSectionSidebar,
+                ConfigSection::History => MessageId::ConfigSectionHistory,
+                ConfigSection::Mcp => MessageId::ConfigSectionMcp,
+            },
+        )
     }
 }
 
@@ -765,16 +771,20 @@ impl ConfigView {
             return true;
         }
 
-        let section = row.section.label().to_lowercase();
+        let section = row.section.label(self.locale).to_lowercase();
+        let section_en = row.section.label(Locale::En).to_lowercase();
         let key = row.key.to_lowercase();
         let value = self.row_display_value(row).to_lowercase();
-        let scope = row.scope.label().to_lowercase();
+        let scope = row.scope.label(self.locale).to_lowercase();
+        let scope_en = row.scope.label(Locale::En).to_lowercase();
 
         filter.split_whitespace().all(|term| {
             section.contains(term)
+                || section_en.contains(term)
                 || key.contains(term)
                 || value.contains(term)
                 || scope.contains(term)
+                || scope_en.contains(term)
         })
     }
 
@@ -1345,7 +1355,7 @@ impl ModalView for ConfigView {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("Scope: ", Style::default().fg(palette::TEXT_MUTED)),
-                Span::raw(edit.scope.label()),
+                Span::raw(edit.scope.label(self.locale)),
             ]));
             lines.push(Line::from(vec![
                 Span::styled("Current: ", Style::default().fg(palette::TEXT_MUTED)),
@@ -1427,7 +1437,7 @@ impl ModalView for ConfigView {
                 match item {
                     ConfigListItem::Section(section) => {
                         lines.push(Line::from(Span::styled(
-                            format!("  {}", section.label()),
+                            format!("  {}", section.label(self.locale)),
                             Style::default().fg(palette::DEEPSEEK_SKY).bold(),
                         )));
                     }
@@ -1449,7 +1459,8 @@ impl ModalView for ConfigView {
                         let key = truncate_view_text(&row.key, key_column_width);
                         let value =
                             truncate_view_text(&self.row_display_value(row), value_column_width);
-                        let scope = truncate_view_text(row.scope.label(), scope_column_width);
+                        let scope =
+                            truncate_view_text(row.scope.label(self.locale), scope_column_width);
                         let mut line = Line::from(format!(
                             "  {:<key_width$} {:<value_width$} {:<scope_width$}",
                             key,
@@ -2038,8 +2049,8 @@ fn truncate_view_text(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConfigListItem, ConfigSection, ConfigView, HelpView, ModalKind, ModalView, ViewAction,
-        ViewEvent, ViewStack, subagent_view_agents, truncate_view_text,
+        ConfigListItem, ConfigView, HelpView, ModalKind, ModalView, ViewAction, ViewEvent,
+        ViewStack, subagent_view_agents, truncate_view_text,
     };
     use crate::config::Config;
     use crate::localization::Locale;
@@ -2231,10 +2242,16 @@ mod tests {
         view.visible_items()
             .into_iter()
             .filter_map(|item| match item {
-                ConfigListItem::Section(section) => Some(section.label()),
+                ConfigListItem::Section(section) => Some(section.label(view.locale)),
                 ConfigListItem::Row(_) => None,
             })
             .collect()
+    }
+
+    fn create_config_view(locale: Locale) -> ConfigView {
+        let mut app = create_test_app();
+        app.ui_locale = locale;
+        ConfigView::new_for_app(&app)
     }
 
     fn visible_row_keys(view: &ConfigView) -> Vec<&str> {
@@ -2259,20 +2276,19 @@ mod tests {
 
     #[test]
     fn config_view_groups_rows_by_expected_sections() {
-        let app = create_test_app();
-        let view = ConfigView::new_for_app(&app);
+        let view = create_config_view(Locale::En);
         assert_eq!(
             visible_section_labels(&view),
             vec![
-                ConfigSection::Provider.label(),
-                ConfigSection::Model.label(),
-                ConfigSection::Permissions.label(),
-                ConfigSection::Network.label(),
-                ConfigSection::Display.label(),
-                ConfigSection::Composer.label(),
-                ConfigSection::Sidebar.label(),
-                ConfigSection::History.label(),
-                ConfigSection::Mcp.label(),
+                "Provider",
+                "Model",
+                "Permissions",
+                "Network",
+                "Display",
+                "Composer",
+                "Sidebar",
+                "History",
+                "MCP",
             ]
         );
     }
@@ -2441,8 +2457,7 @@ base_url = "https://api.xiaomimimo.com/v1"
 
     #[test]
     fn config_view_filter_matches_group_and_rows() {
-        let app = create_test_app();
-        let mut view = ConfigView::new_for_app(&app);
+        let mut view = create_config_view(Locale::En);
 
         type_filter(&mut view, "side");
 
@@ -2453,6 +2468,20 @@ base_url = "https://api.xiaomimimo.com/v1"
             vec!["sidebar_width", "sidebar_focus", "context_panel"]
         );
         assert_eq!(view.rows[view.selected].key, "sidebar_width");
+    }
+
+    #[test]
+    fn localized_config_view_filter_matches_english_section_and_scope_labels() {
+        let mut view = create_config_view(Locale::PtBr);
+
+        type_filter(&mut view, "sidebar saved");
+
+        assert_eq!(view.filter, "sidebar saved");
+        assert_eq!(visible_section_labels(&view), vec!["Barra lateral"]);
+        assert_eq!(
+            visible_row_keys(&view),
+            vec!["sidebar_width", "sidebar_focus", "context_panel"]
+        );
     }
 
     #[test]
@@ -2492,8 +2521,7 @@ base_url = "https://api.xiaomimimo.com/v1"
 
     #[test]
     fn config_view_keeps_scope_column_aligned_for_long_keys() {
-        let app = create_test_app();
-        let mut view = ConfigView::new_for_app(&app);
+        let mut view = create_config_view(Locale::ZhHans);
         type_filter(&mut view, "composer");
         let area = Rect::new(0, 0, 100, 24);
         let mut buf = Buffer::empty(area);
@@ -2507,7 +2535,8 @@ base_url = "https://api.xiaomimimo.com/v1"
         );
         let scope_columns = dump
             .lines()
-            .filter_map(|line| line.find("SAVED").or_else(|| line.find("SESSION")))
+            .filter(|line| line.contains("composer_") || line.contains("bracketed_paste"))
+            .filter_map(|line| line.find('已'))
             .collect::<Vec<_>>();
         assert!(
             scope_columns.len() >= 3,
