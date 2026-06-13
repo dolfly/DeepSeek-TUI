@@ -121,6 +121,7 @@ impl ProviderPickerView {
             ApiProvider::Huggingface => "HUGGINGFACE_API_KEY / HF_TOKEN",
             ApiProvider::Together => "TOGETHER_API_KEY",
             ApiProvider::OpenaiCodex => "OPENAI_CODEX_ACCESS_TOKEN / CODEX_ACCESS_TOKEN",
+            ApiProvider::Zai | ApiProvider::Stepfun => "OPENAI_API_KEY",
         }
     }
 
@@ -514,7 +515,9 @@ mod tests {
                 "Hugging Face",
                 "Together AI",
                 "OpenAI Codex (ChatGPT)",
-                "Anthropic"
+                "Anthropic",
+                "Z.ai (GLM Coding)",
+                "StepFun / StepFlash"
             ]
         );
     }
@@ -549,7 +552,7 @@ mod tests {
         let mut picker = ProviderPickerView::new(ApiProvider::Deepseek, &config);
 
         picker.handle_key(key(KeyCode::Up));
-        assert_eq!(picker.selected_provider(), ApiProvider::Anthropic);
+        assert_eq!(picker.selected_provider(), ApiProvider::Stepfun);
 
         picker.handle_key(key(KeyCode::Down));
         assert_eq!(picker.selected_provider(), ApiProvider::Deepseek);
