@@ -221,13 +221,13 @@ regulations:
       - "When a phase reveals sub-problems, add them to the checklist or open investigation sub-agent sessions — don't guess."
 
   sub_agent_strategy:
-    text: "Sub-agents are cheap — DeepSeek V4 Flash costs $0.14/M input. Use them liberally for parallel work:"
+    text: "Sub-agents keep your main context clean; each is a real spawn, so use them deliberately for genuinely independent work:"
     patterns:
       - "Parallel investigation: 3+ independent files or modules → one read-only sub-agent per target"
       - "Parallel implementation: after a plan is laid out, one sub-agent per independent leaf task"
       - "Solo tasks: a single read, search, or focused question — do these yourself"
       - "Sequential work: if step B depends on step A's output, run A yourself first"
-      - "Concurrent cap: defaults to 10 (configurable via config.toml, hard ceiling 20). Batch when you need more."
+      - "Concurrency, honestly: ~4 direct children run at once (interactive_max_launch, default 4); the rest queue. Open a small batch (~4), poll with agent_eval, then open the next batch. Don't fire a large burst in one turn — it starves the UI. (max_concurrent 10/ceiling 20 caps tracked agents, not parallel execution.)"
 
   parallel_first:
     text: "Before you fire any tool, scan your checklist: is there another tool you could run concurrently? Serializing independent operations wastes time and context."

@@ -135,6 +135,15 @@ an error with the cap value; the parent should use `agent_eval` to wait for a
 running agent to complete, or `agent_close` to cancel a running agent, before
 retrying.
 
+That `max_concurrent` value is a ceiling on **tracked** agents, not a measure of
+how many execute at once. Direct children are additionally gated by
+`[subagents].interactive_max_launch` (default **4**): only about four run
+concurrently and the rest **queue** for a slot. The practical guidance for the
+model is therefore to open a small batch (~4), poll with nonblocking
+`agent_eval`, and open the next batch as slots free — not to fire a large burst
+of `agent_open` calls in one turn. (See the freeze-fix work for why a big
+simultaneous fanout previously wedged the TUI: #3216 / #2211.)
+
 The cap counts only **running** agents — completed / failed /
 cancelled records persist for inspection but don't occupy a slot.
 Agents that lost their `task_handle` (e.g. across a process

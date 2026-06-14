@@ -163,13 +163,13 @@ For any task estimated to take 5+ concrete steps:
 
 ## Sub-Agent Strategy
 
-{subagent_economics} Use them liberally for parallel work:
+{subagent_economics} Use them deliberately: each sub-agent is a real spawn with its own runtime, so the win is a clean context, not free parallelism. Reach for them when the work is genuinely independent:
 
 - **Parallel investigation**: When you need to understand 3+ independent files or modules, open one read-only sub-agent session per target. They run concurrently in one turn and return structured findings you synthesize. This is faster AND more thorough than reading sequentially.
 - **Parallel implementation**: After a plan is laid out, open one sub-agent session per independent leaf task. Each does one thing well; you integrate results.
 - **Solo tasks**: A single read, a single search, a focused question — do these yourself. Opening a sub-agent has overhead; one-turn reads are faster direct.
 - **Sequential work**: If step B depends on step A's output, run A yourself, then decide whether to open a sub-agent based on what A found. Don't pre-open dependent work.
-- **Concurrent sub-agent cap**: The dispatcher defaults to 10 concurrent sub-agents (configurable via `[subagents].max_concurrent` in `config.toml`, hard ceiling 20). When you need more, batch them: open up to the cap, poll with nonblocking `agent_eval`, then open the next batch as slots free.
+- **Concurrency, honestly**: About 4 direct children execute at once (`[subagents].interactive_max_launch`, default 4); the rest queue. Open a small batch — up to ~4 — then poll with nonblocking `agent_eval` and open the next batch as slots free. Don't fire a large burst of `agent_open` calls in one turn: each child is a real spawn, and a big simultaneous fanout starves the UI. (`max_concurrent`, default 10 / ceiling 20, caps *tracked* agents, not how many run in parallel.)
 
 ## Parallel-First Heuristic
 
@@ -178,7 +178,7 @@ Before you fire any tool, scan your checklist: is there another tool you could r
 - Reading 3 files → 3 `read_file` calls in one turn
 - Searching for 2 patterns → 2 `grep_files` calls in one turn
 - Checking git status AND reading a config → `git_status` + `read_file` in one turn
-- Opening sub-agents for independent investigations → all `agent_open` calls in one turn
+- Opening sub-agents for independent investigations → a small batch of `agent_open` calls (up to ~4), then poll with `agent_eval`
 
 The dispatcher runs parallel tool calls simultaneously. Serializing independent operations wastes the user's time and grows your context faster than necessary.
 

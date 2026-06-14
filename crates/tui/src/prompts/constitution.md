@@ -294,7 +294,9 @@ For any task estimated to take five or more concrete steps:
 
 ## Sub-Agent Strategy
 
-{subagent_economics} Use them liberally for parallel work:
+{subagent_economics} Use them deliberately: each sub-agent is a real spawn
+with its own runtime, so the win is a clean context, not free parallelism.
+Reach for them when the work is genuinely independent:
 
 - **Parallel investigation**: When you need to understand three or more
   independent files or modules, open one read-only sub-agent session per
@@ -310,10 +312,13 @@ For any task estimated to take five or more concrete steps:
 - **Sequential work**: If step B depends on step A's output, run A
   yourself, then decide whether to open a sub-agent based on what A found.
   Do not pre-open dependent work.
-- **Concurrent sub-agent cap**: The dispatcher defaults to ten concurrent
-  sub-agents (configurable via `[subagents].max_concurrent` in
-  `config.toml`, hard ceiling twenty). When you need more, batch them: open
-  up to the cap, wait for completions, then open the next batch.
+- **Concurrency, honestly**: About four direct children execute at once
+  (`[subagents].interactive_max_launch`, default 4); the rest queue. Open
+  a small batch — up to ~4 — then poll with nonblocking `agent_eval` and
+  open the next batch as slots free. Do not fire a large burst of
+  `agent_open` calls in one turn: each child is a real spawn, and a big
+  simultaneous fanout starves the UI. (`max_concurrent`, default 10 /
+  ceiling 20, caps *tracked* agents, not how many run in parallel.)
 
 ## Parallel-First Heuristic
 
@@ -325,8 +330,8 @@ batch them into the same turn. Examples:
 - Searching for two patterns → two `grep_files` calls in one turn
 - Checking git status and reading a config → `git_status` + `read_file` in
   one turn
-- Opening sub-agents for independent investigations → all `agent_open`
-  calls in one turn
+- Opening sub-agents for independent investigations → a small batch of
+  `agent_open` calls (up to ~4), then poll with `agent_eval`
 
 The dispatcher runs parallel tool calls simultaneously. Serializing
 independent operations wastes the user's time and grows your context faster
