@@ -90,6 +90,7 @@ mod snapshot;
 mod task_manager;
 #[cfg(test)]
 mod test_support;
+mod theme_override;
 mod theme_qa_audit;
 mod tls;
 mod tool_output_receipts;
