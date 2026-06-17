@@ -61,7 +61,9 @@ pub(crate) fn provider_router_candidates(
         | ApiProvider::Siliconflow
         | ApiProvider::SiliconflowCn
         | ApiProvider::Sglang
-        | ApiProvider::Vllm => RouterCandidates {
+        | ApiProvider::Vllm
+        | ApiProvider::WanjieArk
+        | ApiProvider::Volcengine => RouterCandidates {
             big: crate::config::wire_model_for_provider(provider, "deepseek-v4-pro"),
             cheap: Some(crate::config::wire_model_for_provider(
                 provider,
@@ -426,9 +428,13 @@ pub(crate) async fn resolve_auto_route_with_inventory(
 ) -> Result<AutoRouteSelection> {
     let inventory = ModelInventory::from_config(config);
     if !inventory.router_available {
-        bail!(
-            "model auto requires a DeepSeek API key so codewhale can use deepseek-v4-flash as the non-thinking router. Run `codewhale auth set --provider deepseek` or choose an explicit model."
-        );
+        // Fall back to heuristic-only auto routing when the flash router
+        // is unavailable (e.g. non-DeepSeek providers like wanjie-ark).
+        return Ok(auto_route_from_inventory_heuristic(
+            config,
+            latest_request,
+            &inventory,
+        ));
     }
 
     let heuristic = auto_route_from_inventory_heuristic(config, latest_request, &inventory);
@@ -534,10 +540,12 @@ fn auto_route_from_inventory_heuristic(
     latest_request: &str,
     inventory: &ModelInventory,
 ) -> AutoRouteSelection {
-    let fallback = inventory
-        .active_default()
-        .or_else(|| inventory.candidates.first());
-    let Some(candidate) = fallback else {
+    let candidates = &inventory.candidates;
+    let Some(active) = candidates
+        .iter()
+        .find(|c| c.provider == config.api_provider())
+        .or_else(|| candidates.first())
+    else {
         return AutoRouteSelection {
             provider: config.api_provider(),
             model: config.default_model(),
@@ -545,9 +553,16 @@ fn auto_route_from_inventory_heuristic(
             source: AutoRouteSource::Heuristic,
         };
     };
+    // Use the candidates' cheap/big info for complexity-based routing.
+    let router_candidates = provider_router_candidates(config.api_provider(), &active.model);
+    let chosen = if router_candidates.cheap.is_some() {
+        auto_model_heuristic_for_candidates(latest_request, &active.model, &router_candidates)
+    } else {
+        active.model.clone()
+    };
     AutoRouteSelection {
-        provider: candidate.provider,
-        model: candidate.model.clone(),
+        provider: active.provider,
+        model: chosen,
         reasoning_effort: Some(crate::auto_reasoning::select(false, latest_request)),
         source: AutoRouteSource::Heuristic,
     }
