@@ -1271,6 +1271,40 @@ impl ExploringCell {
             low_motion,
         ));
 
+        // Dot-grid status strip — one glyph per entry, showing parallel
+        // fanout at a glance: ●=done ◐=running ✕=failed.
+        if self.entries.len() > 1 {
+            let (done, running, failed) =
+                self.entries
+                    .iter()
+                    .fold((0usize, 0usize, 0usize), |(d, r, f), e| match e.status {
+                        ToolStatus::Success | ToolStatus::Hydrated => (d + 1, r, f),
+                        ToolStatus::Running => (d, r + 1, f),
+                        ToolStatus::Failed => (d, r, f + 1),
+                    });
+            let dots: String = self
+                .entries
+                .iter()
+                .map(|e| match e.status {
+                    ToolStatus::Success | ToolStatus::Hydrated => "\u{25CF}",
+                    ToolStatus::Running => "\u{25D0}",
+                    ToolStatus::Failed => "\u{2715}",
+                })
+                .collect();
+            let counts = format!(
+                "{done} done, {running} running{}",
+                if failed > 0 {
+                    format!(", {failed} failed")
+                } else {
+                    String::new()
+                },
+            );
+            lines.push(Line::styled(
+                format!("  {dots}  {counts}"),
+                Style::default().fg(palette::DEEPSEEK_SKY),
+            ));
+        }
+
         for entry in &self.entries {
             let prefix = match entry.status {
                 ToolStatus::Running => "live",
