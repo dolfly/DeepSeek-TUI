@@ -1092,7 +1092,13 @@ pub fn model_completion_names_for_provider(provider: ApiProvider) -> Vec<&'stati
             vec![DEFAULT_HUGGINGFACE_MODEL, DEFAULT_HUGGINGFACE_FLASH_MODEL]
         }
         ApiProvider::Deepinfra => vec![DEFAULT_DEEPINFRA_MODEL, DEFAULT_DEEPINFRA_FLASH_MODEL],
-        ApiProvider::WanjieArk => vec![DEFAULT_WANJIE_ARK_MODEL],
+        ApiProvider::WanjieArk => {
+            vec![
+                DEFAULT_WANJIE_ARK_MODEL,
+                "deepseek-v4-pro",
+                "deepseek-v4-flash",
+            ]
+        }
         ApiProvider::Sglang => vec![DEFAULT_SGLANG_MODEL, DEFAULT_SGLANG_FLASH_MODEL],
         ApiProvider::Vllm => vec![DEFAULT_VLLM_MODEL, DEFAULT_VLLM_FLASH_MODEL],
         ApiProvider::Volcengine => vec![DEFAULT_VOLCENGINE_MODEL, DEFAULT_VOLCENGINE_FLASH_MODEL],
@@ -8680,6 +8686,15 @@ api_key = "old-openrouter-key"
             model_completion_names_for_provider(ApiProvider::Deepseek),
             vec!["deepseek-v4-pro", "deepseek-v4-flash"]
         );
+    }
+
+    #[test]
+    fn model_completion_names_for_wanjie_keep_legacy_default_and_v4_ids() {
+        let models = model_completion_names_for_provider(ApiProvider::WanjieArk);
+
+        assert_eq!(models.first().copied(), Some(DEFAULT_WANJIE_ARK_MODEL));
+        assert!(models.contains(&"deepseek-v4-pro"));
+        assert!(models.contains(&"deepseek-v4-flash"));
     }
 
     #[test]
