@@ -1268,6 +1268,7 @@ mod tests {
         let entries = build_entries(
             Locale::En,
             tmp.path().join("skills").as_path(),
+            false,
             workspace.as_path(),
             tmp.path().join("mcp.json").as_path(),
             None,
@@ -1300,6 +1301,7 @@ mod tests {
         let entries = build_entries(
             Locale::En,
             tmp.path().join("skills").as_path(),
+            false,
             workspace.as_path(),
             tmp.path().join("mcp.json").as_path(),
             None,
@@ -1327,6 +1329,7 @@ mod tests {
         let entries = build_entries(
             Locale::En,
             tmp.path().join("skills").as_path(),
+            false,
             workspace.as_path(),
             tmp.path().join("mcp.json").as_path(),
             None,
