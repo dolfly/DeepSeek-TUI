@@ -2459,32 +2459,8 @@ impl Config {
         if has_provider_base {
             return;
         }
-        let table = match provider {
-            ApiProvider::Openai => "providers.openai",
-            ApiProvider::Atlascloud => "providers.atlascloud",
-            ApiProvider::WanjieArk => "providers.wanjie_ark",
-            ApiProvider::Openrouter => "providers.openrouter",
-            ApiProvider::XiaomiMimo => "providers.xiaomi_mimo",
-            ApiProvider::Novita => "providers.novita",
-            ApiProvider::Fireworks => "providers.fireworks",
-            ApiProvider::Siliconflow => "providers.siliconflow",
-            ApiProvider::SiliconflowCn => "providers.siliconflow_cn",
-            ApiProvider::Arcee => "providers.arcee",
-            ApiProvider::Moonshot => "providers.moonshot",
-            ApiProvider::Sglang => "providers.sglang",
-            ApiProvider::Vllm => "providers.vllm",
-            ApiProvider::Ollama => "providers.ollama",
-            ApiProvider::Volcengine => "providers.volcengine",
-            ApiProvider::Huggingface => "providers.huggingface",
-            ApiProvider::Deepinfra => "providers.deepinfra",
-            ApiProvider::NvidiaNim => "providers.nvidia_nim",
-            ApiProvider::Together => "providers.together",
-            ApiProvider::OpenaiCodex => "providers.openai_codex",
-            ApiProvider::Anthropic => "providers.anthropic",
-            ApiProvider::Zai => "providers.zai",
-            ApiProvider::Stepfun => "providers.stepfun",
-            ApiProvider::Minimax => "providers.minimax",
-            ApiProvider::Deepseek | ApiProvider::DeepseekCN => return,
+        let Ok(table) = provider_config_table_name(provider) else {
+            return;
         };
         tracing::warn!(
             "Top-level `base_url = \"{root_base}\"` is ignored for the {provider:?} provider. \
@@ -2919,33 +2895,6 @@ impl Config {
     /// placeholder, not empty whitespace).
     pub fn deepseek_api_key(&self) -> Result<String> {
         let provider = self.api_provider();
-        let slot = match provider {
-            ApiProvider::Deepseek | ApiProvider::DeepseekCN => "deepseek",
-            ApiProvider::NvidiaNim => "nvidia-nim",
-            ApiProvider::Openai => "openai",
-            ApiProvider::Atlascloud => "atlascloud",
-            ApiProvider::WanjieArk => "wanjie-ark",
-            ApiProvider::Openrouter => "openrouter",
-            ApiProvider::XiaomiMimo => "xiaomi-mimo",
-            ApiProvider::Novita => "novita",
-            ApiProvider::Fireworks => "fireworks",
-            ApiProvider::Siliconflow => "siliconflow",
-            ApiProvider::SiliconflowCn => "siliconflow",
-            ApiProvider::Arcee => "arcee",
-            ApiProvider::Moonshot => "moonshot",
-            ApiProvider::Sglang => "sglang",
-            ApiProvider::Vllm => "vllm",
-            ApiProvider::Ollama => "ollama",
-            ApiProvider::Volcengine => "volcengine",
-            ApiProvider::Huggingface => "huggingface",
-            ApiProvider::Deepinfra => "deepinfra",
-            ApiProvider::Together => "together",
-            ApiProvider::OpenaiCodex => "openai_codex",
-            ApiProvider::Zai => "zai",
-            ApiProvider::Stepfun => "stepfun",
-            ApiProvider::Anthropic => "anthropic",
-            ApiProvider::Minimax => "minimax",
-        };
 
         // 0. DeepSeek compatibility slot. The legacy top-level `api_key`
         // belongs to DeepSeek only; provider-specific keys below must win for
@@ -2959,7 +2908,7 @@ impl Config {
         //   codewhale --provider deepseek --api-key ark-... --base-url ... --model auto
         if matches!(provider, ApiProvider::Deepseek | ApiProvider::DeepseekCN)
             && std::env::var("DEEPSEEK_API_KEY_SOURCE").as_deref() == Ok("cli")
-            && let Some(env_key) = codewhale_secrets::env_for("deepseek")
+            && let Some(env_key) = provider_env_api_key(provider)
             && !env_key.trim().is_empty()
         {
             return Ok(env_key);
@@ -3011,24 +2960,8 @@ impl Config {
                 return Ok(value);
             }
         }
-        if let Some(value) = codewhale_secrets::env_for(slot)
-            && !value.trim().is_empty()
-        {
+        if let Some(value) = provider_env_api_key(provider) {
             return Ok(value);
-        }
-
-        // Huggingface supports HF_TOKEN as a fallback env var.
-        if matches!(provider, ApiProvider::Huggingface) {
-            if let Ok(value) = std::env::var("HUGGINGFACE_API_KEY")
-                && !value.trim().is_empty()
-            {
-                return Ok(value);
-            }
-            if let Ok(value) = std::env::var("HF_TOKEN")
-                && !value.trim().is_empty()
-            {
-                return Ok(value);
-            }
         }
 
         if base_url_uses_local_host(&self.deepseek_base_url()) {
@@ -3049,88 +2982,24 @@ impl Config {
                      shells, prefer ~/.zshenv for everything)\n\
                    • api_key = \"<your-key>\"  in ~/.codewhale/config.toml"
             ),
-            ApiProvider::NvidiaNim => anyhow::bail!(
-                "NVIDIA NIM API key not found. Run 'codewhale auth set --provider nvidia-nim', \
-                 set NVIDIA_API_KEY/NVIDIA_NIM_API_KEY, or save api_key in ~/.codewhale/config.toml \
-                 with provider = \"nvidia-nim\"."
-            ),
-            ApiProvider::Openai => anyhow::bail!(
-                "OpenAI-compatible API key not found. Run 'codewhale auth set --provider openai', \
-                 set OPENAI_API_KEY, or add [providers.openai] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Atlascloud => anyhow::bail!(
-                "AtlasCloud API key not found. Run 'codewhale auth set --provider atlascloud', \
-                 set ATLASCLOUD_API_KEY, or add [providers.atlascloud] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::WanjieArk => anyhow::bail!(
-                "Wanjie Ark API key not found. Run 'codewhale auth set --provider wanjie-ark', \
-                 set WANJIE_ARK_API_KEY/WANJIE_API_KEY/WANJIE_MAAS_API_KEY, or add \
-                 [providers.wanjie_ark] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Volcengine => anyhow::bail!(
-                "Volcengine Ark API key not found. Run 'codewhale auth set --provider volcengine', \
-                 set VOLCENGINE_API_KEY/VOLCENGINE_ARK_API_KEY/ARK_API_KEY, or add \
-                 [providers.volcengine] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Openrouter => anyhow::bail!(
-                "OpenRouter API key not found. Run 'codewhale auth set --provider openrouter', \
-                 set OPENROUTER_API_KEY, or add [providers.openrouter] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::XiaomiMimo => anyhow::bail!(
-                "Xiaomi MiMo API key not found. Run 'codewhale auth set --provider xiaomi-mimo', \
-                 set XIAOMI_MIMO_API_KEY/XIAOMI_API_KEY/MIMO_API_KEY, or add [providers.xiaomi_mimo] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Novita => anyhow::bail!(
-                "Novita API key not found. Run 'codewhale auth set --provider novita', \
-                 set NOVITA_API_KEY, or add [providers.novita] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Fireworks => anyhow::bail!(
-                "Fireworks AI API key not found. Run 'codewhale auth set --provider fireworks', \
-                 set FIREWORKS_API_KEY, or add [providers.fireworks] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Siliconflow => anyhow::bail!(
-                "SiliconFlow API key not found. Run 'codewhale auth set --provider siliconflow', \
-                 set SILICONFLOW_API_KEY, or add [providers.siliconflow] api_key in ~/.codewhale/config.toml."
-            ),
             ApiProvider::SiliconflowCn => anyhow::bail!(
                 "SiliconFlow China API key not found. Run 'codewhale auth set --provider siliconflow-CN', \
-                 set SILICONFLOW_API_KEY, or add [providers.siliconflow_cn] api_key in ~/.codewhale/config.toml. \
-                 [providers.siliconflow] remains a fallback when the CN table omits api_key."
-            ),
-            ApiProvider::Arcee => anyhow::bail!(
-                "Arcee AI API key not found. Run 'codewhale auth set --provider arcee', \
-                 set ARCEE_API_KEY, or add [providers.arcee] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Huggingface => anyhow::bail!(
-                "Hugging Face API key not found. Run 'codewhale auth set --provider huggingface', \
-                 set HUGGINGFACE_API_KEY or HF_TOKEN, or add [providers.huggingface] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Deepinfra => anyhow::bail!(
-                "DeepInfra API key not found. Run 'codewhale auth set --provider deepinfra', \
-                 set DEEPINFRA_API_KEY or DEEPINFRA_TOKEN, or add [providers.deepinfra] api_key in ~/.codewhale/config.toml."
+                 set {}, or add [{}] api_key in ~/.codewhale/config.toml. \
+                 [providers.siliconflow] remains a fallback when the CN table omits api_key.",
+                provider.env_vars_label(),
+                provider_config_table_name(provider)?
             ),
             ApiProvider::Moonshot => anyhow::bail!(
                 "Moonshot/Kimi API key not found. Run 'codewhale auth set --provider moonshot', \
-                 set MOONSHOT_API_KEY/KIMI_API_KEY, or add [providers.moonshot] api_key. \
+                 set {}, or add [{}] api_key. \
                  For a Kimi Code plan key, set [providers.moonshot] base_url = \
-                 \"https://api.kimi.com/coding/v1\" and model = \"kimi-for-coding\"."
-            ),
-            ApiProvider::Together => anyhow::bail!(
-                "Together AI API key not found. Run 'codewhale auth set --provider together', \
-                 set TOGETHER_API_KEY, or add [providers.together] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Zai => anyhow::bail!(
-                "Z.ai (GLM Coding) API key not found. Run 'codewhale auth set --provider zai', \
-                 set ZAI_API_KEY, or add [providers.zai] api_key in ~/.codewhale/config.toml."
-            ),
-            ApiProvider::Stepfun => anyhow::bail!(
-                "StepFun API key not found. Run 'codewhale auth set --provider stepfun', \
-                 set STEPFUN_API_KEY, or add [providers.stepfun] api_key in ~/.codewhale/config.toml."
+                 \"https://api.kimi.com/coding/v1\" and model = \"kimi-for-coding\".",
+                provider.env_vars_label(),
+                provider_config_table_name(provider)?
             ),
             ApiProvider::Anthropic => anyhow::bail!(
-                "Anthropic API key not found. Run 'codewhale auth set --provider anthropic', \
-                 set ANTHROPIC_API_KEY, or add [providers.anthropic] api_key in ~/.codewhale/config.toml. \
-                 Keys are created at https://platform.claude.com/."
+                "{} Keys are created at https://platform.claude.com/.",
+                missing_provider_api_key_message(provider)?
             ),
             ApiProvider::OpenaiCodex => anyhow::bail!(
                 "OpenAI Codex OAuth credentials not found.\n\
@@ -3144,11 +3013,8 @@ impl Config {
             ),
             // Self-hosted deployments commonly run without auth on localhost.
             // Return an empty key and let the client omit the Authorization header.
-            ApiProvider::Minimax => anyhow::bail!(
-                "MiniMax API key not found. Run 'codewhale auth set --provider minimax', \
-                 set MINIMAX_API_KEY, or add [providers.minimax] api_key in ~/.codewhale/config.toml."
-            ),
             ApiProvider::Sglang | ApiProvider::Vllm | ApiProvider::Ollama => Ok(String::new()),
+            _ => anyhow::bail!("{}", missing_provider_api_key_message(provider)?),
         }
     }
 
@@ -5604,11 +5470,7 @@ pub fn active_provider_has_config_api_key(config: &Config) -> bool {
 
 #[must_use]
 pub fn active_provider_has_env_api_key(config: &Config) -> bool {
-    config
-        .api_provider()
-        .env_vars()
-        .iter()
-        .any(|var| std::env::var(var).is_ok_and(|k| !k.trim().is_empty()))
+    provider_env_api_key(config.api_provider()).is_some()
 }
 
 #[must_use]
@@ -5790,6 +5652,28 @@ fn provider_config_key(provider: ApiProvider) -> Result<&'static str> {
         .metadata()
         .map(|metadata| metadata.provider_config_key())
         .context("provider config key")
+}
+
+fn provider_config_table_name(provider: ApiProvider) -> Result<String> {
+    Ok(format!("providers.{}", provider_config_key(provider)?))
+}
+
+fn provider_env_api_key(provider: ApiProvider) -> Option<String> {
+    provider.env_vars().iter().find_map(|var| {
+        std::env::var(var)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    })
+}
+
+fn missing_provider_api_key_message(provider: ApiProvider) -> Result<String> {
+    Ok(format!(
+        "{} API key not found. Run 'codewhale auth set --provider {}', set {}, or add [{}] api_key in ~/.codewhale/config.toml.",
+        provider.display_name(),
+        provider.as_str(),
+        provider.env_vars_label(),
+        provider_config_table_name(provider)?
+    ))
 }
 
 const KIMI_CODE_CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
@@ -6140,6 +6024,53 @@ mod tests {
 
         assert!(provider_config_key(ApiProvider::Deepseek).is_err());
         assert!(provider_config_key(ApiProvider::DeepseekCN).is_err());
+    }
+
+    #[test]
+    fn deepseek_api_key_reads_metadata_env_vars_for_newer_providers() -> Result<()> {
+        let _lock = lock_test_env();
+        let _source = EnvVarGuard::remove("DEEPSEEK_API_KEY_SOURCE");
+        let cases = [
+            (ApiProvider::Zai, "ZAI_API_KEY", "zai-env-key"),
+            (ApiProvider::Stepfun, "STEPFUN_API_KEY", "stepfun-env-key"),
+            (ApiProvider::Minimax, "MINIMAX_API_KEY", "minimax-env-key"),
+            (
+                ApiProvider::Deepinfra,
+                "DEEPINFRA_API_KEY",
+                "deepinfra-env-key",
+            ),
+            (
+                ApiProvider::Together,
+                "TOGETHER_API_KEY",
+                "together-env-key",
+            ),
+        ];
+        let _env_guards: Vec<_> = cases
+            .iter()
+            .map(|(_, var, value)| EnvVarGuard::set(*var, *value))
+            .collect();
+
+        for (provider, _, expected_key) in cases {
+            let config = Config {
+                provider: Some(provider.as_str().to_string()),
+                ..Config::default()
+            };
+
+            assert_eq!(config.deepseek_api_key()?, expected_key);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn missing_provider_api_key_message_uses_provider_metadata() -> Result<()> {
+        let message = missing_provider_api_key_message(ApiProvider::Zai)?;
+
+        assert!(message.contains("Z.ai (GLM Coding) API key not found"));
+        assert!(message.contains("ZAI_API_KEY / Z_AI_API_KEY"));
+        assert!(message.contains("[providers.zai] api_key"));
+
+        Ok(())
     }
 
     // GHSA-72w5-pf8h-xfp4 — regression: `allow_shell` must be opt-in.
