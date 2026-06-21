@@ -9,8 +9,34 @@ use super::*;
 use crate::core::ops::UserInputProvenance;
 use crate::prompt_zones::PinnedPrefix;
 
-fn loop_guard_block_tool_result(message: String, kind: AttemptBlockKind) -> ToolResult {
+fn loop_guard_block_tool_result(
+    tool_name: &str,
+    message: String,
+    kind: AttemptBlockKind,
+) -> ToolResult {
+    if loop_guard_block_is_guidance(tool_name) {
+        return ToolResult::success(message).with_metadata(json!({
+            "loop_guard": kind.as_str(),
+            "loop_guard_guidance": true,
+            "executed": false,
+        }));
+    }
+
     ToolResult::error(message).with_metadata(json!({"loop_guard": kind.as_str()}))
+}
+
+fn loop_guard_block_is_guidance(tool_name: &str) -> bool {
+    let normalized = tool_name.to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "grep_files"
+            | "file_search"
+            | "list_dir"
+            | "web_search"
+            | "fetch_url"
+            | "tool_search_tool_regex"
+            | "tool_search_tool_bm25"
+    ) || normalized.contains("search")
 }
 
 const MAX_APPROVAL_INTENT_SUMMARY_CHARS: usize = 2_000;
@@ -1609,7 +1635,7 @@ impl Engine {
                         loop_guard.record_attempt(&tool_name, &tool_input, read_only)
                 {
                     crate::logging::warn(message.clone());
-                    guard_result = Some(loop_guard_block_tool_result(message, kind));
+                    guard_result = Some(loop_guard_block_tool_result(&tool_name, message, kind));
                 }
 
                 plans.push(ToolExecutionPlan {
@@ -3082,6 +3108,7 @@ mod tests {
     #[test]
     fn loop_guard_block_tool_result_counts_as_failure() {
         let result = loop_guard_block_tool_result(
+            "edit_file",
             "Blocked: repeated call".to_string(),
             AttemptBlockKind::IdenticalToolCall,
         );
@@ -3097,6 +3124,35 @@ mod tests {
                 .and_then(|m| m.get("loop_guard"))
                 .and_then(|v| v.as_str()),
             Some("identical_tool_call")
+        );
+    }
+
+    #[test]
+    fn loop_guard_search_block_tool_result_is_guidance() {
+        let result = loop_guard_block_tool_result(
+            "grep_files",
+            "Stop calling `grep_files`; use current evidence.".to_string(),
+            AttemptBlockKind::NoProgressToolLoop,
+        );
+
+        assert!(
+            result.success,
+            "read-only search loop blocks should guide the model without feeding the failure loop"
+        );
+        let metadata = result.metadata.as_ref().expect("metadata");
+        assert_eq!(
+            metadata.get("loop_guard").and_then(|v| v.as_str()),
+            Some("no_progress_tool_loop")
+        );
+        assert_eq!(
+            metadata
+                .get("loop_guard_guidance")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            metadata.get("executed").and_then(|v| v.as_bool()),
+            Some(false)
         );
     }
 

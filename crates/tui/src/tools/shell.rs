@@ -1944,6 +1944,10 @@ shell sandbox). Workarounds: (1) run the Docker build from a regular terminal ou
 TUI, or (2) disable BuildKit with DOCKER_BUILDKIT=0 (only works if your Dockerfiles do not \
 use RUN --mount directives).";
 
+const PYTHON_BUILD_DEPENDENCY_HINT: &str = "Python build dependency missing: setuptools is not \
+available in the active environment. Install the declared build requirements first, for example \
+`python -m pip install -U pip setuptools wheel build`, then rerun the build command.";
+
 fn attach_cargo_failure_summary(
     metadata: &mut serde_json::Value,
     command: &str,
@@ -1953,6 +1957,19 @@ fn attach_cargo_failure_summary(
         summarize_cargo_failure(command, &result.stdout, &result.stderr, result.exit_code)
     {
         metadata["cargo_failure_summary"] = summary.to_metadata_value();
+    }
+}
+
+fn attach_python_build_dependency_hint(
+    metadata: &mut serde_json::Value,
+    hint: Option<&'static str>,
+) {
+    if let Some(hint) = hint {
+        metadata["python_build_dependency_hint"] = json!({
+            "kind": "missing_setuptools",
+            "hint": hint,
+            "recommended_first_step": "python -m pip install -U pip setuptools wheel build",
+        });
     }
 }
 
@@ -1969,6 +1986,58 @@ pub(crate) fn looks_like_macos_provenance_failure(result: &ShellResult) -> bool 
 fn macos_provenance_hint(result: &ShellResult) -> Option<&'static str> {
     if looks_like_macos_provenance_failure(result) {
         Some(MACOS_PROVENANCE_HINT)
+    } else {
+        None
+    }
+}
+
+fn python_build_dependency_hint(command: &str, result: &ShellResult) -> Option<&'static str> {
+    if matches!(result.status, ShellStatus::Completed) && result.exit_code == Some(0) {
+        return None;
+    }
+
+    let command = command.to_ascii_lowercase();
+    let combined = format!("{}\n{}", result.stdout, result.stderr).to_ascii_lowercase();
+    let mentions_missing_setuptools = [
+        "no module named 'setuptools'",
+        "no module named \"setuptools\"",
+        "setuptools is not available",
+        "cannot import 'setuptools",
+        "cannot import \"setuptools",
+        "missing dependencies",
+    ]
+    .iter()
+    .any(|needle| combined.contains(needle))
+        && combined.contains("setuptools");
+    if !mentions_missing_setuptools {
+        return None;
+    }
+
+    let pythonish_command = [
+        "python",
+        "pip",
+        "pytest",
+        "tox",
+        "nox",
+        "cython",
+        "setup.py",
+        "build_ext",
+    ]
+    .iter()
+    .any(|needle| command.contains(needle));
+    let pythonish_output = [
+        "setup.py",
+        "pyproject.toml",
+        "build_meta",
+        "build_ext",
+        "pep 517",
+        "cython",
+    ]
+    .iter()
+    .any(|needle| combined.contains(needle));
+
+    if pythonish_command || pythonish_output {
+        Some(PYTHON_BUILD_DEPENDENCY_HINT)
     } else {
         None
     }
@@ -2482,13 +2551,17 @@ impl ToolSpec for ExecShellTool {
             } else {
                 stdout_summary.clone()
             };
-            let output = if result.stdout.is_empty() && result.stderr.is_empty() {
+            let python_dependency_hint = python_build_dependency_hint(command, &result);
+            let mut output = if result.stdout.is_empty() && result.stderr.is_empty() {
                 "(no output)".to_string()
             } else if result.stderr.is_empty() {
                 result.stdout.clone()
             } else {
                 format!("{}\n\nSTDERR:\n{}", result.stdout, result.stderr)
             };
+            if let Some(hint) = python_dependency_hint {
+                output = format!("{hint}\n\n{output}");
+            }
 
             let mut metadata = json!({
                 "exit_code": result.exit_code,
@@ -2514,6 +2587,7 @@ impl ToolSpec for ExecShellTool {
             });
             attach_shell_owner_metadata(&mut metadata, context);
             attach_cargo_failure_summary(&mut metadata, command, &result);
+            attach_python_build_dependency_hint(&mut metadata, python_dependency_hint);
 
             return Ok(ToolResult {
                 content: output,
@@ -2592,6 +2666,7 @@ impl ToolSpec for ExecShellTool {
                 let network_restricted_hint =
                     shell_network_restricted_hint(context, command, &result).map(str::to_string);
                 let provenance_hint = macos_provenance_hint(&result);
+                let python_dependency_hint = python_build_dependency_hint(command, &result);
                 let mut output = if interactive {
                     format!(
                         "Interactive command completed (exit code: {:?})",
@@ -2635,6 +2710,9 @@ impl ToolSpec for ExecShellTool {
                     output = format!("{hint}\n\n{output}");
                 }
                 if let Some(hint) = provenance_hint {
+                    output = format!("{hint}\n\n{output}");
+                }
+                if let Some(hint) = python_dependency_hint {
                     output = format!("{hint}\n\n{output}");
                 }
 
@@ -2702,6 +2780,7 @@ impl ToolSpec for ExecShellTool {
                 }
                 attach_shell_owner_metadata(&mut metadata, context);
                 attach_cargo_failure_summary(&mut metadata, command, &result);
+                attach_python_build_dependency_hint(&mut metadata, python_dependency_hint);
 
                 Ok(ToolResult {
                     content: output,
@@ -2748,6 +2827,7 @@ fn build_shell_delta_tool_result(delta: ShellDeltaResult, context: &ToolContext)
     let network_restricted_hint =
         shell_network_restricted_hint(context, &delta.command, &result).map(str::to_string);
     let provenance_hint = macos_provenance_hint(&result);
+    let python_dependency_hint = python_build_dependency_hint(&delta.command, &result);
     let stdout_summary = summarize_output(&result.stdout);
     let stderr_summary = summarize_output(&result.stderr);
     let summary = if !stderr_summary.is_empty() {
@@ -2775,6 +2855,9 @@ fn build_shell_delta_tool_result(delta: ShellDeltaResult, context: &ToolContext)
     if let Some(hint) = provenance_hint {
         output = format!("{hint}\n\n{output}");
     }
+    if let Some(hint) = python_dependency_hint {
+        output = format!("{hint}\n\n{output}");
+    }
 
     let mut metadata = json!({
         "exit_code": result.exit_code,
@@ -2800,6 +2883,7 @@ fn build_shell_delta_tool_result(delta: ShellDeltaResult, context: &ToolContext)
     });
     attach_shell_owner_metadata(&mut metadata, context);
     attach_cargo_failure_summary(&mut metadata, &delta.command, &result);
+    attach_python_build_dependency_hint(&mut metadata, python_dependency_hint);
 
     let mut tool_result = ToolResult {
         content: output,

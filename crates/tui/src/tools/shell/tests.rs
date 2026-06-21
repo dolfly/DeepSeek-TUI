@@ -860,6 +860,58 @@ fn shell_delta_result_keeps_existing_summary_for_generic_cargo_failure() {
 }
 
 #[test]
+fn shell_delta_result_surfaces_python_build_dependency_hint() {
+    let tmp = tempdir().expect("tempdir");
+    let ctx = ToolContext::new(tmp.path());
+    let result = ShellResult {
+        task_id: None,
+        status: ShellStatus::Failed,
+        exit_code: Some(1),
+        stdout: String::new(),
+        stderr: "running build_ext\nModuleNotFoundError: No module named 'setuptools'\n"
+            .to_string(),
+        duration_ms: 12,
+        stdout_len: 0,
+        stderr_len: 72,
+        stdout_omitted: 0,
+        stderr_omitted: 0,
+        stdout_truncated: false,
+        stderr_truncated: false,
+        sandboxed: false,
+        sandbox_type: None,
+        sandbox_denied: false,
+    };
+
+    let tool_result = build_shell_delta_tool_result(
+        ShellDeltaResult {
+            command: "python setup.py build_ext --inplace".to_string(),
+            result,
+            stdout_total_len: 0,
+            stderr_total_len: 72,
+        },
+        &ctx,
+    );
+
+    assert!(!tool_result.success);
+    assert!(
+        tool_result
+            .content
+            .starts_with("Python build dependency missing")
+    );
+    let metadata = tool_result.metadata.expect("metadata");
+    assert_eq!(
+        metadata["python_build_dependency_hint"]["kind"],
+        json!("missing_setuptools")
+    );
+    assert!(
+        metadata["python_build_dependency_hint"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("setuptools")
+    );
+}
+
+#[test]
 fn test_summarize_output_strips_truncation_note() {
     let long_output = "x".repeat(60_000);
     let (truncated, _meta) = truncate_with_meta(&long_output);
