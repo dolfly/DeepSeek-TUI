@@ -33,6 +33,12 @@ PROVIDERS_MD = ROOT / "docs" / "PROVIDERS.md"
 
 
 API_PROVIDER_ONLY_IDS = {"deepseek-cn"}
+
+# `custom` is the dynamic OpenAI-compatible meta-provider (#1519): a single
+# catch-all `[providers.custom]` table that backs arbitrary user-defined
+# endpoints, not a canonical shipped provider with a docs row. It is excluded
+# from the provider-table drift check.
+META_PROVIDER_TABLES = {"custom"}
 SHARED_PROVIDER_TABLES = {
     "siliconflow-CN": "siliconflow_cn",
 }
@@ -368,7 +374,11 @@ def main() -> int:
             canonical_ids,
             shipped_provider_rows(providers_md),
         )
-        errors += report_set("provider TOML tables", expected_tables, provider_tables(config_rs))
+        errors += report_set(
+            "provider TOML tables",
+            expected_tables,
+            provider_tables(config_rs) - META_PROVIDER_TABLES,
+        )
         errors += report_set(
             "documented provider TOML tables",
             expected_tables,
