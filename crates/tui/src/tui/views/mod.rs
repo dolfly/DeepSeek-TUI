@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{buffer::Buffer, layout::Rect};
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::fmt;
 
@@ -386,7 +387,7 @@ enum ConfigScope {
 }
 
 impl ConfigScope {
-    fn label(self, locale: Locale) -> &'static str {
+    fn label(self, locale: Locale) -> Cow<'static, str> {
         tr(
             locale,
             match self {
@@ -426,7 +427,7 @@ enum ConfigSection {
 }
 
 impl ConfigSection {
-    fn label(self, locale: Locale) -> &'static str {
+    fn label(self, locale: Locale) -> Cow<'static, str> {
         tr(
             locale,
             match self {
@@ -515,7 +516,7 @@ impl ConfigView {
                 value: settings
                     .default_model
                     .as_deref()
-                    .unwrap_or(tr(app.ui_locale, MessageId::ConfigDefaultValue))
+                    .unwrap_or(&*tr(app.ui_locale, MessageId::ConfigDefaultValue))
                     .to_string(),
                 editable: true,
                 scope: ConfigScope::Saved,
@@ -806,7 +807,7 @@ impl ConfigView {
         }
     }
 
-    fn tr(&self, id: MessageId) -> &'static str {
+    fn tr(&self, id: MessageId) -> Cow<'static, str> {
         tr(self.locale, id)
     }
 
@@ -1707,7 +1708,7 @@ impl ModalView for ConfigView {
                         let value =
                             truncate_view_text(&self.row_display_value(row), value_column_width);
                         let scope =
-                            truncate_view_text(row.scope.label(self.locale), scope_column_width);
+                            truncate_view_text(&row.scope.label(self.locale), scope_column_width);
                         let mut line = Line::from(format!(
                             "  {key:<key_column_width$} {value:<value_column_width$} {scope:<scope_column_width$}"
                         ));
@@ -2339,6 +2340,7 @@ mod tests {
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
     use ratatui::{buffer::Buffer, layout::Rect};
+    use std::borrow::Cow;
     use std::ffi::OsString;
     use std::fs;
     use std::path::PathBuf;
@@ -2530,7 +2532,7 @@ mod tests {
         }
     }
 
-    fn visible_section_labels(view: &ConfigView) -> Vec<&'static str> {
+    fn visible_section_labels(view: &ConfigView) -> Vec<Cow<'static, str>> {
         view.visible_items()
             .into_iter()
             .filter_map(|item| match item {
@@ -3253,7 +3255,7 @@ base_url = "https://api.xiaomimimo.com/v1"
         assert!(view.editing.is_none());
         assert_eq!(
             view.status.as_deref(),
-            Some(tr(Locale::En, MessageId::ConfigEditCancelled))
+            Some(&*tr(Locale::En, MessageId::ConfigEditCancelled))
         );
     }
 

@@ -1444,7 +1444,7 @@ mod tests {
             assert!(
                 entry
                     .description
-                    .contains(command.description_for(Locale::En)),
+                    .contains(&*command.description_for(Locale::En)),
                 "/{} palette description should include command help text",
                 command.name
             );
