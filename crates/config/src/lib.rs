@@ -166,9 +166,9 @@ pub struct ProvidersToml {
 
 /// Sibling `permissions.toml` schema.
 ///
-/// This slice is intentionally ask-only: each rule is a typed condition that
-/// means "ask before this tool invocation." Typed allow/deny records and UI
-/// actions are expected to land in follow-up PRs.
+/// Each rule is a typed condition that can deny, allow, or ask before a tool
+/// invocation. UI actions that persist deny/allow rules are future work; the
+/// approval card still saves ask rules.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PermissionsToml {

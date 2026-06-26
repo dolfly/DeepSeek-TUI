@@ -73,12 +73,12 @@ impl Ruleset {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionAction {
-    /// Deny the invocation — the tool call is blocked.
-    Deny,
-    /// Ask the user before allowing — the approval prompt is forced.
-    Ask,
     /// Allow the invocation without asking.
     Allow,
+    /// Ask the user before allowing — the approval prompt is forced.
+    Ask,
+    /// Deny the invocation — the tool call is blocked.
+    Deny,
 }
 
 fn default_rule_action() -> PermissionAction {
@@ -369,7 +369,7 @@ impl ExecPolicyEngine {
                 (Some(_), None) => false,
                 (None, _) => true,
             })
-            .max_by_key(|(layer, rule)| (*layer, ask_rule_specificity(rule)))
+            .max_by_key(|(layer, rule)| (rule.action, *layer, ask_rule_specificity(rule)))
             .map(|(_, rule)| rule.clone())
     }
 
@@ -1352,6 +1352,68 @@ mod tests {
             .check(ctx("sed -i 's/a/b/' x.txt", UnlessTrusted))
             .unwrap();
         assert!(!d.allow, "deny must win over allow");
+    }
+
+    #[test]
+    fn deny_wins_over_allow_via_ask_rules_regardless_of_order() {
+        let engine =
+            ExecPolicyEngine::with_rulesets(vec![Ruleset::user(vec![], vec![]).with_ask_rules(
+                vec![
+                    ToolAskRule {
+                        tool: "exec_shell".into(),
+                        command: Some("sed".into()),
+                        path: None,
+                        action: PermissionAction::Deny,
+                    },
+                    ToolAskRule {
+                        tool: "exec_shell".into(),
+                        command: Some("sed".into()),
+                        path: None,
+                        action: PermissionAction::Allow,
+                    },
+                ],
+            )]);
+
+        let d = engine
+            .check(ctx("sed -i 's/a/b/' x.txt", UnlessTrusted))
+            .unwrap();
+        assert!(!d.allow, "deny must win even if allow appears later");
+        assert_eq!(d.matched_action, Some(PermissionAction::Deny));
+    }
+
+    #[test]
+    fn path_deny_wins_over_path_allow_regardless_of_order() {
+        let engine =
+            ExecPolicyEngine::with_rulesets(vec![Ruleset::user(vec![], vec![]).with_ask_rules(
+                vec![
+                    ToolAskRule {
+                        tool: "write_file".into(),
+                        command: None,
+                        path: Some("src/secrets.rs".into()),
+                        action: PermissionAction::Deny,
+                    },
+                    ToolAskRule {
+                        tool: "write_file".into(),
+                        command: None,
+                        path: Some("src/secrets.rs".into()),
+                        action: PermissionAction::Allow,
+                    },
+                ],
+            )]);
+
+        let d = engine
+            .check(ExecPolicyContext {
+                command: "",
+                cwd: "/workspace",
+                tool: Some("write_file"),
+                path: Some("/workspace/src/secrets.rs"),
+                ask_for_approval: UnlessTrusted,
+                sandbox_mode: None,
+            })
+            .unwrap();
+
+        assert!(!d.allow, "path deny must win even if allow appears later");
+        assert_eq!(d.matched_action, Some(PermissionAction::Deny));
     }
 
     #[test]

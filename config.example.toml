@@ -223,10 +223,12 @@ sandbox_mode = "workspace-write" # read-only | workspace-write | danger-full-acc
 # [[rules]]
 # tool = "write_file"
 # path = "src/main.rs"
+# action = "deny"
 #
 # [[rules]]
 # tool = "edit_file"
 # path = "src/lib.rs"
+# action = "ask"
 #
 # [[rules]]
 # tool = "apply_patch"
