@@ -48,6 +48,14 @@ impl PluginRegistry {
         self.plugins.get(name)
     }
 
+    pub fn enabled_plugins(&self) -> Vec<(&String, &LoadedPlugin)> {
+        self.plugins.iter().filter(|(_, p)| p.enabled).collect()
+    }
+
+    pub fn list_enabled(&self) -> Vec<(&String, &LoadedPlugin)> {
+        self.enabled_plugins()
+    }
+
     pub fn is_enabled(&self, name: &str) -> bool {
         self.plugins.get(name).map_or(false, |p| p.enabled)
     }
