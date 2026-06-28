@@ -941,6 +941,7 @@ impl Engine {
                                 input,
                                 caller,
                                 input_buffer: String::new(),
+                                input_parse_error: None,
                             });
                         }
                         ContentBlockStart::ServerToolUse { id, name, input } => {
@@ -955,6 +956,7 @@ impl Engine {
                                 input,
                                 caller: None,
                                 input_buffer: String::new(),
+                                input_parse_error: None,
                             });
                         }
                     },
@@ -1066,6 +1068,11 @@ impl Engine {
                                         "Tool '{}' failed to parse final input buffer: '{}'",
                                         tool_state.name, tool_state.input_buffer
                                     ));
+                                    let error =
+                                        malformed_tool_arguments_error(&tool_state.input_buffer);
+                                    tool_state.input_parse_error = Some(error);
+                                    tool_state.input =
+                                        malformed_tool_arguments_input(&tool_state.input_buffer);
                                     let _ = self
                                         .tx_event
                                         .send(Event::status(format!(
@@ -1223,6 +1230,7 @@ impl Engine {
                         input: call.args,
                         caller: None,
                         input_buffer: String::new(),
+                        input_parse_error: None,
                     });
                 }
             }
@@ -1586,6 +1594,12 @@ impl Engine {
                     blocked_error = Some(ToolError::permission_denied(format!(
                         "'{tool_name}' is not available in Plan mode — switch to Agent or YOLO mode to run commands and code."
                     )));
+                }
+
+                if blocked_error.is_none()
+                    && let Some(error) = tool.input_parse_error.clone()
+                {
+                    blocked_error = Some(ToolError::invalid_input(error));
                 }
 
                 // #3027: deny wins over allow — check the deny-list first so a

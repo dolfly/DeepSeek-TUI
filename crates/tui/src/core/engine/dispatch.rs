@@ -273,6 +273,9 @@ fn is_transient_tool_failure(err: &ToolError, formatted_message: &str) -> bool {
 ///      (the per-delta parser has already mirrored the most recent valid
 ///      partial parse into `tool_state.input`).
 pub(super) fn final_tool_input(state: &ToolUseState) -> serde_json::Value {
+    if state.input_parse_error.is_some() {
+        return malformed_tool_arguments_input(&state.input_buffer);
+    }
     if !state.input_buffer.trim().is_empty()
         && let Some(parsed) = parse_tool_input(&state.input_buffer)
     {
@@ -305,6 +308,14 @@ pub(super) fn parse_tool_input(buffer: &str) -> Option<serde_json::Value> {
     }
     extract_json_segment(trimmed)
         .and_then(|segment| serde_json::from_str::<serde_json::Value>(&segment).ok())
+}
+
+pub(super) fn malformed_tool_arguments_input(buffer: &str) -> serde_json::Value {
+    json!({ "raw_arguments": buffer })
+}
+
+pub(super) fn malformed_tool_arguments_error(buffer: &str) -> String {
+    format!("malformed tool arguments from model: expected valid JSON, got {buffer:?}")
 }
 
 fn strip_code_fences(text: &str) -> Option<String> {

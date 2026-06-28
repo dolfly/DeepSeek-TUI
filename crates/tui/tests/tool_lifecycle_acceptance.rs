@@ -19,6 +19,7 @@ const FEATURE_PATH: &str = concat!(
 );
 const HAPPY_PATH_SCENARIO: &str = "Happy path lists the current directory through a tool";
 const UNKNOWN_TOOL_SCENARIO: &str = "Unknown tool returns an error result";
+const MALFORMED_ARGUMENTS_SCENARIO: &str = "Malformed tool arguments return an error result";
 const TOOL_CALL_ID: &str = "call_tool";
 const TEST_MODEL: &str = "acceptance-model";
 
@@ -28,7 +29,7 @@ struct ToolLifecycleWorld {
     home: Option<TempDir>,
     llm_server: Option<MockServer>,
     tool_name: Option<String>,
-    tool_input: Option<Value>,
+    tool_arguments: Option<String>,
     final_answer: Option<String>,
     prompt: Option<String>,
     stdout: String,
@@ -74,7 +75,19 @@ fn mocked_llm_will_request_tool(world: &mut ToolLifecycleWorld, tool_name: Strin
     );
 
     world.tool_name = Some(tool_name);
-    world.tool_input = Some(input);
+    world.tool_arguments = Some(serde_json::to_string(&input).expect("tool input arguments"));
+}
+
+#[given(
+    regex = r#"^the mocked LLM will request the "([^"]+)" tool with malformed arguments "([^"]+)"$"#
+)]
+fn mocked_llm_will_request_tool_with_malformed_arguments(
+    world: &mut ToolLifecycleWorld,
+    tool_name: String,
+    arguments: String,
+) {
+    world.tool_name = Some(tool_name);
+    world.tool_arguments = Some(arguments);
 }
 
 #[given("the mocked LLM will answer after the tool result:")]
@@ -243,6 +256,77 @@ fn codewhale_should_send_tool_error_back_to_mocked_llm(world: &mut ToolLifecycle
     );
 }
 
+#[then(
+    regex = r#"^the public tool lifecycle should show a running tool with raw input for "([^"]+)"$"#
+)]
+fn public_tool_lifecycle_should_show_running_tool_with_raw_input(
+    world: &mut ToolLifecycleWorld,
+    tool_name: String,
+) {
+    let event = tool_use_event(world, &tool_name);
+    assert!(
+        value_contains_text(event.get("input").expect("tool_use input"), "{not-json"),
+        "tool_use input should preserve malformed raw arguments:\n{event:#}"
+    );
+}
+
+#[then(regex = r#"^the public tool result should report malformed arguments for "([^"]+)"$"#)]
+fn public_tool_result_should_report_malformed_arguments_for(
+    world: &mut ToolLifecycleWorld,
+    tool_name: String,
+) {
+    let _ = tool_use_event(world, &tool_name);
+    let event = tool_result_event(world);
+
+    assert_eq!(event.get("status").and_then(Value::as_str), Some("error"));
+    let output = event
+        .get("output")
+        .and_then(Value::as_str)
+        .expect("tool_result error output");
+    assert_malformed_arguments_text(output);
+}
+
+#[then("CodeWhale should send the malformed argument error back to the mocked LLM")]
+fn codewhale_should_send_malformed_argument_error_back_to_mocked_llm(
+    world: &mut ToolLifecycleWorld,
+) {
+    let request = world
+        .requests
+        .iter()
+        .find(|request| request_contains_tool_result(request))
+        .expect("expected a follow-up chat request containing the malformed argument error");
+    let tool_result = tool_result_message(request).expect("tool result message");
+    assert_eq!(
+        tool_result
+            .get("tool_call_id")
+            .and_then(serde_json::Value::as_str),
+        Some(TOOL_CALL_ID)
+    );
+
+    let content = tool_result
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .expect("tool result content");
+    assert_malformed_arguments_text(content);
+}
+
+#[then(
+    regex = r#"^the public tool lifecycle should show a failed tool with raw input for "([^"]+)"$"#
+)]
+fn public_tool_lifecycle_should_show_failed_tool_with_raw_input(
+    world: &mut ToolLifecycleWorld,
+    tool_name: String,
+) {
+    let event = tool_result_event(world);
+    assert_eq!(event.get("status").and_then(Value::as_str), Some("error"));
+
+    let tool_use = tool_use_event(world, &tool_name);
+    assert!(
+        value_contains_text(tool_use.get("input").expect("tool_use input"), "{not-json"),
+        "failed tool_use input should preserve malformed raw arguments:\n{tool_use:#}"
+    );
+}
+
 #[then("the public tool lifecycle should show a completed tool:")]
 fn public_tool_lifecycle_should_show_completed_tool(world: &mut ToolLifecycleWorld, step: &Step) {
     let expected = one_table_row(step);
@@ -301,6 +385,11 @@ async fn unknown_tool_returns_error_result() {
     run_scenario(UNKNOWN_TOOL_SCENARIO, 10).await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn malformed_tool_arguments_return_error_result() {
+    run_scenario(MALFORMED_ARGUMENTS_SCENARIO, 10).await;
+}
+
 async fn run_scenario(name: &'static str, expected_steps: usize) {
     let writer = ToolLifecycleWorld::cucumber()
         .fail_on_skipped()
@@ -344,7 +433,7 @@ async fn start_mock_llm(world: &ToolLifecycleWorld) -> MockServer {
         .and(request_has_no_tool_result)
         .respond_with(sse_response(&tool_call_sse(
             world.tool_name.as_ref().expect("tool name"),
-            world.tool_input.as_ref().expect("tool input"),
+            world.tool_arguments.as_ref().expect("tool arguments"),
         )))
         .mount(&server)
         .await;
@@ -479,8 +568,7 @@ fn preserve_host_env(command: &mut Command) {
     }
 }
 
-fn tool_call_sse(tool_name: &str, tool_input: &Value) -> String {
-    let arguments = serde_json::to_string(tool_input).expect("tool input arguments");
+fn tool_call_sse(tool_name: &str, arguments: &str) -> String {
     [
         sse_chunk(json!({
             "id": "chatcmpl-tool",
@@ -552,6 +640,18 @@ fn final_answer_sse(answer: &str) -> String {
         "data: [DONE]\n\n".to_string(),
     ]
     .join("")
+}
+
+fn assert_malformed_arguments_text(text: &str) {
+    let lower = text.to_ascii_lowercase();
+    assert!(
+        lower.contains("argument")
+            && (lower.contains("malformed")
+                || lower.contains("parse")
+                || lower.contains("json")
+                || lower.contains("invalid")),
+        "expected malformed argument error text:\n{text}"
+    );
 }
 
 fn sse_chunk(value: Value) -> String {

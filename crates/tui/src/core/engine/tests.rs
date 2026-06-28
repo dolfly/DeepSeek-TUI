@@ -5126,6 +5126,7 @@ fn tool_state(initial: serde_json::Value, buffer: &str) -> ToolUseState {
         input: initial,
         caller: None,
         input_buffer: buffer.into(),
+        input_parse_error: None,
     }
 }
 
@@ -5147,11 +5148,13 @@ fn final_tool_input_falls_back_to_initial_when_buffer_empty() {
 }
 
 #[test]
-fn final_tool_input_repairs_unparseable_buffer() {
-    // The arg_repair module converts unparseable input to an empty object
-    // {} so dispatch always proceeds. The buffer wins over the initial input.
-    let state = tool_state(json!({"command": "echo hi"}), "{not json");
-    assert_eq!(final_tool_input(&state), json!({}));
+fn final_tool_input_preserves_raw_buffer_for_parse_errors() {
+    let mut state = tool_state(json!({}), "{not json");
+    state.input_parse_error = Some("malformed tool arguments".into());
+    assert_eq!(
+        final_tool_input(&state),
+        json!({"raw_arguments": "{not json"})
+    );
 }
 
 // === #103 transparent stream-retry policy =====================================

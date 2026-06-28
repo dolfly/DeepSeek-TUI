@@ -51,3 +51,19 @@ Feature: Tool call lifecycle
       | status | marker | tool         | input |
       | error  | [!]    | missing_tool | .     |
     And the public output should include "I could not run the requested missing tool."
+
+  Scenario: Malformed tool arguments return an error result
+    Given an offline CodeWhale workspace containing:
+      | path      | kind |
+      | README.md | file |
+    And the mocked LLM will request the "list_dir" tool with malformed arguments "{not-json"
+    And the mocked LLM will answer after the tool result:
+      | content                                 |
+      | I could not parse the tool arguments. |
+    When the user asks "try malformed tool arguments"
+    Then CodeWhale should send the user request to the mocked LLM
+    And the public tool lifecycle should show a running tool with raw input for "list_dir"
+    And the public tool result should report malformed arguments for "list_dir"
+    And CodeWhale should send the malformed argument error back to the mocked LLM
+    And the public tool lifecycle should show a failed tool with raw input for "list_dir"
+    And the public output should include "I could not parse the tool arguments."

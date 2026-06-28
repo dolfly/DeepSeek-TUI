@@ -21,6 +21,7 @@ pub(super) struct ToolUseState {
     pub(super) input: serde_json::Value,
     pub(super) caller: Option<ToolCaller>,
     pub(super) input_buffer: String,
+    pub(super) input_parse_error: Option<String>,
 }
 
 /// Maximum total bytes of text/thinking content before aborting the stream.
