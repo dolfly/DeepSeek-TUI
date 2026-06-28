@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `codewhale doctor` / `codewhale doctor --json` legacy-state
+  diagnostics that compare known `~/.deepseek` state paths with their
+  `~/.codewhale` counterparts and flag unmigrated or dual-root data (#3727).
 - Added Sakana AI Fugu as a first-class OpenAI-compatible provider with
   `sakana`/`fugu` aliases, `FUGU_API_KEY` / `SAKANA_API_KEY` discovery,
   provider-picker wiring, model completions, and provider docs. Harvested from

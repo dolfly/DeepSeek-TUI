@@ -2811,6 +2811,12 @@ async fn run_doctor(config: &Config, workspace: &Path, config_path_override: Opt
             crate::utils::display_path(&legacy_home)
         );
     }
+    let legacy_state_report = doctor_legacy_state_report(&code_home, &legacy_home);
+    print_doctor_legacy_state_report(
+        &legacy_state_report,
+        (aqua_r, aqua_g, aqua_b),
+        (sky_r, sky_g, sky_b),
+    );
 
     // Check API keys
     println!();
@@ -3561,6 +3567,180 @@ async fn run_doctor(config: &Config, workspace: &Path, config_path_override: Opt
     );
 }
 
+const DOCTOR_LEGACY_STATE_ITEMS: &[&str] = &[
+    "sessions",
+    "tasks",
+    "skills",
+    "slop_ledger",
+    "trophies",
+    "catalog",
+    "review-receipts",
+    "config.toml",
+    "settings.toml",
+    "mcp.json",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DoctorLegacyStateStatus {
+    PrimaryOnly,
+    LegacyOnly,
+    Both,
+    Absent,
+}
+
+impl DoctorLegacyStateStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::PrimaryOnly => "primary_only",
+            Self::LegacyOnly => "legacy_only",
+            Self::Both => "both",
+            Self::Absent => "absent",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DoctorLegacyStateEntry {
+    name: &'static str,
+    primary_path: PathBuf,
+    legacy_path: PathBuf,
+    primary_present: bool,
+    legacy_present: bool,
+    status: DoctorLegacyStateStatus,
+}
+
+fn doctor_legacy_state_status(
+    primary_present: bool,
+    legacy_present: bool,
+) -> DoctorLegacyStateStatus {
+    match (primary_present, legacy_present) {
+        (true, false) => DoctorLegacyStateStatus::PrimaryOnly,
+        (false, true) => DoctorLegacyStateStatus::LegacyOnly,
+        (true, true) => DoctorLegacyStateStatus::Both,
+        (false, false) => DoctorLegacyStateStatus::Absent,
+    }
+}
+
+fn doctor_legacy_state_report(
+    primary_root: &Path,
+    legacy_root: &Path,
+) -> Vec<DoctorLegacyStateEntry> {
+    DOCTOR_LEGACY_STATE_ITEMS
+        .iter()
+        .copied()
+        .map(|name| {
+            let primary_path = primary_root.join(name);
+            let legacy_path = legacy_root.join(name);
+            let primary_present = primary_path.exists();
+            let legacy_present = legacy_path.exists();
+            let status = doctor_legacy_state_status(primary_present, legacy_present);
+            DoctorLegacyStateEntry {
+                name,
+                primary_path,
+                legacy_path,
+                primary_present,
+                legacy_present,
+                status,
+            }
+        })
+        .collect()
+}
+
+fn legacy_state_needs_attention(entry: &DoctorLegacyStateEntry) -> bool {
+    matches!(
+        entry.status,
+        DoctorLegacyStateStatus::LegacyOnly | DoctorLegacyStateStatus::Both
+    )
+}
+
+fn print_doctor_legacy_state_report(
+    report: &[DoctorLegacyStateEntry],
+    ok_rgb: (u8, u8, u8),
+    warn_rgb: (u8, u8, u8),
+) {
+    use colored::Colorize;
+
+    let attention: Vec<_> = report
+        .iter()
+        .filter(|entry| legacy_state_needs_attention(entry))
+        .collect();
+    if attention.is_empty() {
+        println!(
+            "  {} legacy state: no known .deepseek entries need migration",
+            "✓".truecolor(ok_rgb.0, ok_rgb.1, ok_rgb.2)
+        );
+        return;
+    }
+
+    println!(
+        "  {} legacy state needs review:",
+        "!".truecolor(warn_rgb.0, warn_rgb.1, warn_rgb.2)
+    );
+    for entry in attention {
+        match entry.status {
+            DoctorLegacyStateStatus::LegacyOnly => {
+                println!(
+                    "    {} {} exists but {} is missing",
+                    "!".truecolor(warn_rgb.0, warn_rgb.1, warn_rgb.2),
+                    crate::utils::display_path(&entry.legacy_path),
+                    crate::utils::display_path(&entry.primary_path),
+                );
+            }
+            DoctorLegacyStateStatus::Both => {
+                println!(
+                    "    {} {} exists alongside primary {}; legacy data may still need review",
+                    "!".truecolor(warn_rgb.0, warn_rgb.1, warn_rgb.2),
+                    crate::utils::display_path(&entry.legacy_path),
+                    crate::utils::display_path(&entry.primary_path),
+                );
+            }
+            DoctorLegacyStateStatus::PrimaryOnly | DoctorLegacyStateStatus::Absent => {}
+        }
+    }
+    println!(
+        "    Run `codewhale setup --migrate` or start CodeWhale once to trigger safe migration where available."
+    );
+}
+
+fn doctor_legacy_state_json(
+    primary_root: &Path,
+    legacy_root: &Path,
+    report: &[DoctorLegacyStateEntry],
+) -> serde_json::Value {
+    use serde_json::json;
+
+    let legacy_only = report
+        .iter()
+        .filter(|entry| entry.status == DoctorLegacyStateStatus::LegacyOnly)
+        .count();
+    let both = report
+        .iter()
+        .filter(|entry| entry.status == DoctorLegacyStateStatus::Both)
+        .count();
+    let entries: Vec<_> = report
+        .iter()
+        .map(|entry| {
+            json!({
+                "name": entry.name,
+                "primary_path": entry.primary_path.display().to_string(),
+                "legacy_path": entry.legacy_path.display().to_string(),
+                "primary_present": entry.primary_present,
+                "legacy_present": entry.legacy_present,
+                "status": entry.status.as_str(),
+            })
+        })
+        .collect();
+
+    json!({
+        "primary_root": primary_root.display().to_string(),
+        "legacy_root": legacy_root.display().to_string(),
+        "needs_attention": legacy_only > 0 || both > 0,
+        "legacy_only_count": legacy_only,
+        "dual_present_count": both,
+        "entries": entries,
+    })
+}
+
 /// Machine-readable counterpart to `run_doctor`. Skips the live API call so it
 /// is safe to run in CI and from non-interactive scripts.
 fn run_doctor_json(
@@ -3700,12 +3880,18 @@ fn run_doctor_json(
     let api_target = doctor_api_target(config);
     let strict_tool_mode = doctor_strict_tool_mode_status(config);
     let tls_status = doctor_tls_status(config);
+    let code_home =
+        codewhale_config::codewhale_home().unwrap_or_else(|_| PathBuf::from("~/.codewhale"));
+    let legacy_home =
+        codewhale_config::legacy_deepseek_home().unwrap_or_else(|_| PathBuf::from("~/.deepseek"));
+    let legacy_state_report = doctor_legacy_state_report(&code_home, &legacy_home);
 
     let report = json!({
         "version": env!("CARGO_PKG_VERSION"),
         "config_path": config_path.display().to_string(),
         "config_present": config_path.exists(),
         "workspace": workspace.display().to_string(),
+        "legacy_state": doctor_legacy_state_json(&code_home, &legacy_home, &legacy_state_report),
         "api_key": {
             "source": api_key_state,
         },
@@ -7377,6 +7563,122 @@ mod serve_bind_host_tests {
             err.to_string()
                 .contains("--http and --mobile are mutually exclusive")
         );
+    }
+}
+
+#[cfg(test)]
+mod doctor_legacy_state_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn roots(tmp: &TempDir) -> (PathBuf, PathBuf) {
+        (tmp.path().join(".codewhale"), tmp.path().join(".deepseek"))
+    }
+
+    fn entry<'a>(report: &'a [DoctorLegacyStateEntry], name: &str) -> &'a DoctorLegacyStateEntry {
+        report
+            .iter()
+            .find(|entry| entry.name == name)
+            .expect("legacy state entry should exist")
+    }
+
+    #[test]
+    fn doctor_legacy_state_report_marks_unmigrated_legacy_entries() {
+        let tmp = TempDir::new().expect("tempdir");
+        let (primary_root, legacy_root) = roots(&tmp);
+        fs::create_dir_all(legacy_root.join("sessions")).expect("legacy sessions");
+        fs::create_dir_all(legacy_root.join("tasks")).expect("legacy tasks");
+        fs::create_dir_all(&primary_root).expect("primary root");
+        fs::write(legacy_root.join("config.toml"), "api_key = 'old'").expect("legacy config");
+
+        let report = doctor_legacy_state_report(&primary_root, &legacy_root);
+
+        assert_eq!(
+            entry(&report, "sessions").status,
+            DoctorLegacyStateStatus::LegacyOnly
+        );
+        assert_eq!(
+            entry(&report, "config.toml").status,
+            DoctorLegacyStateStatus::LegacyOnly
+        );
+        assert_eq!(
+            entry(&report, "skills").status,
+            DoctorLegacyStateStatus::Absent
+        );
+
+        let json = doctor_legacy_state_json(&primary_root, &legacy_root, &report);
+        assert_eq!(json["needs_attention"], true);
+        assert_eq!(json["legacy_only_count"], 3);
+        assert_eq!(json["dual_present_count"], 0);
+    }
+
+    #[test]
+    fn doctor_legacy_state_report_marks_dual_present_entries() {
+        let tmp = TempDir::new().expect("tempdir");
+        let (primary_root, legacy_root) = roots(&tmp);
+        fs::create_dir_all(primary_root.join("sessions")).expect("primary sessions");
+        fs::create_dir_all(legacy_root.join("sessions")).expect("legacy sessions");
+        fs::write(primary_root.join("mcp.json"), "{}").expect("primary mcp");
+        fs::write(legacy_root.join("mcp.json"), "{}").expect("legacy mcp");
+
+        let report = doctor_legacy_state_report(&primary_root, &legacy_root);
+
+        assert_eq!(
+            entry(&report, "sessions").status,
+            DoctorLegacyStateStatus::Both
+        );
+        assert_eq!(
+            entry(&report, "mcp.json").status,
+            DoctorLegacyStateStatus::Both
+        );
+
+        let json = doctor_legacy_state_json(&primary_root, &legacy_root, &report);
+        assert_eq!(json["needs_attention"], true);
+        assert_eq!(json["legacy_only_count"], 0);
+        assert_eq!(json["dual_present_count"], 2);
+    }
+
+    #[test]
+    fn doctor_legacy_state_report_is_clear_when_only_primary_exists() {
+        let tmp = TempDir::new().expect("tempdir");
+        let (primary_root, legacy_root) = roots(&tmp);
+        fs::create_dir_all(primary_root.join("sessions")).expect("primary sessions");
+        fs::write(primary_root.join("settings.toml"), "default_mode = 'ask'")
+            .expect("primary settings");
+
+        let report = doctor_legacy_state_report(&primary_root, &legacy_root);
+
+        assert_eq!(
+            entry(&report, "sessions").status,
+            DoctorLegacyStateStatus::PrimaryOnly
+        );
+        assert!(!report.iter().any(legacy_state_needs_attention));
+
+        let json = doctor_legacy_state_json(&primary_root, &legacy_root, &report);
+        assert_eq!(json["needs_attention"], false);
+        assert_eq!(json["legacy_only_count"], 0);
+        assert_eq!(json["dual_present_count"], 0);
+    }
+
+    #[test]
+    fn doctor_legacy_state_report_is_clear_when_neither_root_exists() {
+        let tmp = TempDir::new().expect("tempdir");
+        let (primary_root, legacy_root) = roots(&tmp);
+
+        let report = doctor_legacy_state_report(&primary_root, &legacy_root);
+
+        assert!(
+            report
+                .iter()
+                .all(|entry| entry.status == DoctorLegacyStateStatus::Absent)
+        );
+        assert!(!report.iter().any(legacy_state_needs_attention));
+
+        let json = doctor_legacy_state_json(&primary_root, &legacy_root, &report);
+        assert_eq!(json["needs_attention"], false);
+        assert_eq!(json["legacy_only_count"], 0);
+        assert_eq!(json["dual_present_count"], 0);
     }
 }
 
