@@ -32,8 +32,8 @@ use crate::model_profile::{SupportState, resolved_capability_profile};
 use crate::palette;
 use crate::tui::app::ReasoningEffort;
 use crate::tui::views::{
-    ActionHint, ModalKind, ModalView, ViewAction, ViewEvent, render_modal_footer,
-    render_modal_surface,
+    ActionHint, ModalKind, ModalView, ViewAction, ViewEvent, centered_modal_area,
+    render_modal_footer, render_modal_surface,
 };
 use codewhale_config::catalog::{CatalogOffering, CatalogSnapshot};
 use codewhale_config::provider::WireFormat;
@@ -1497,19 +1497,11 @@ impl ModalView for ProviderPickerView {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let popup_width = 120.min(area.width.saturating_sub(4)).max(64);
-        let popup_height = match self.stage {
+        let preferred_height = match self.stage {
             Stage::List => (self.rows.len() as u16).saturating_add(2),
             Stage::KeyEntry => 10,
-        }
-        .min(area.height.saturating_sub(4))
-        .max(8);
-        let popup_area = Rect {
-            x: area.x + (area.width.saturating_sub(popup_width)) / 2,
-            y: area.y + (area.height.saturating_sub(popup_height)) / 2,
-            width: popup_width,
-            height: popup_height,
         };
+        let popup_area = centered_modal_area(area, 120, preferred_height, 64, 8);
 
         render_modal_surface(area, popup_area, buf);
 

@@ -22,8 +22,8 @@ use crate::model_registry;
 use crate::palette;
 use crate::tui::app::{App, ReasoningEffort};
 use crate::tui::views::{
-    ActionHint, ModalKind, ModalView, ViewAction, ViewEvent, render_modal_footer,
-    render_modal_surface,
+    ActionHint, ModalKind, ModalView, ViewAction, ViewEvent, centered_modal_area,
+    render_modal_footer, render_modal_surface,
 };
 
 /// Thinking-effort rows shown for DeepSeek-style providers, in the order
@@ -748,27 +748,10 @@ impl ModalView for ModelPickerView {
 
 impl ModelPickerView {
     fn render_classic(&self, area: Rect, buf: &mut Buffer) {
-        let available_width = area.width.saturating_sub(4);
-        let popup_width = if available_width >= 60 {
-            available_width.min(96)
-        } else {
-            area.width.saturating_sub(2).max(1)
-        };
         let desired_height = (self.model_row_count().max(self.current_efforts().len()) as u16)
             .saturating_add(4)
             .clamp(10, 22);
-        let available_height = area.height.saturating_sub(4);
-        let popup_height = if available_height >= 10 {
-            desired_height.min(available_height)
-        } else {
-            area.height.saturating_sub(2).max(1)
-        };
-        let popup_area = Rect {
-            x: area.x + (area.width.saturating_sub(popup_width)) / 2,
-            y: area.y + (area.height.saturating_sub(popup_height)) / 2,
-            width: popup_width,
-            height: popup_height,
-        };
+        let popup_area = centered_modal_area(area, 96, desired_height, 60, 10);
 
         render_modal_surface(area, popup_area, buf);
 

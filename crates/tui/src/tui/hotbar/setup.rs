@@ -13,7 +13,8 @@ use crate::config::Config;
 use crate::palette;
 use crate::tui::app::App;
 use crate::tui::views::{
-    ActionHint, ModalKind, ModalView, ViewAction, ViewEvent, render_modal_footer,
+    ActionHint, ModalKind, ModalView, ViewAction, ViewEvent, centered_modal_area,
+    render_modal_footer,
 };
 
 use super::actions::{
@@ -528,14 +529,7 @@ impl ModalView for HotbarSetupView {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let popup_width = 118.min(area.width.saturating_sub(4)).max(72);
-        let popup_height = 28.min(area.height.saturating_sub(4)).max(12);
-        let popup_area = Rect {
-            x: area.x + (area.width.saturating_sub(popup_width)) / 2,
-            y: area.y + (area.height.saturating_sub(popup_height)) / 2,
-            width: popup_width,
-            height: popup_height,
-        };
+        let popup_area = centered_modal_area(area, 118, 28, 72, 12);
         Clear.render(popup_area, buf);
         let block = Block::default()
             .title(" Hotbar setup ")
