@@ -10,6 +10,7 @@ mod provider_defaults;
 mod provider_kind;
 pub mod route;
 pub mod setup_state;
+pub mod user_constitution;
 pub use harness::{
     HarnessCompactionStrategy, HarnessPosture, HarnessPostureKind, HarnessProfile,
     HarnessSafetyPosture, HarnessToolSurface, built_in_harness_profiles,
@@ -21,6 +22,7 @@ pub use setup_state::{
     ConstitutionChoice, ConstitutionSource, ConstitutionValidity, InheritedConfigFacts,
     RuntimePostureSource, SetupState, SetupStep, StepEntry, StepStatus,
 };
+pub use user_constitution::{AutonomyPreference, UserConstitution, UserConstitutionLoad};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
