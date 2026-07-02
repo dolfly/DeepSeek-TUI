@@ -1795,6 +1795,33 @@ fn find_sse_event_separator_accepts_lf_and_crlf() {
     );
 }
 
+#[test]
+fn find_sse_event_separator_bytes_matches_str_and_survives_multibyte() {
+    // Same offsets as the str version.
+    assert_eq!(
+        find_sse_event_separator_bytes(b"event: endpoint\n\n"),
+        Some((15, 2))
+    );
+    assert_eq!(
+        find_sse_event_separator_bytes(b"event: endpoint\r\n\r\n"),
+        Some((15, 4))
+    );
+    // A frame whose data holds a multi-byte char, accumulated byte-wise and
+    // split mid-char across two reads, decodes intact (no U+FFFD).
+    let frame = "data: 你好\n\n";
+    let bytes = frame.as_bytes();
+    let split = bytes.len() - 3; // inside "好" / before the separator
+    let mut buffer: Vec<u8> = Vec::new();
+    buffer.extend_from_slice(&bytes[..split]);
+    assert_eq!(find_sse_event_separator_bytes(&buffer), None);
+    buffer.extend_from_slice(&bytes[split..]);
+    let (pos, sep) = find_sse_event_separator_bytes(&buffer).expect("separator");
+    let block = String::from_utf8_lossy(&buffer[..pos]).into_owned();
+    assert_eq!(block, "data: 你好");
+    assert!(!block.contains('\u{FFFD}'), "multibyte corrupted");
+    assert_eq!(sep, 2);
+}
+
 #[tokio::test]
 #[ignore = "flaky: requires a live TCP listener and is sensitive to port allocation races"]
 async fn mcp_connection_supports_streamable_http_event_stream_responses() {

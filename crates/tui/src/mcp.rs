@@ -724,6 +724,8 @@ fn parse_sse_message_data(body: &str) -> Vec<Vec<u8>> {
     messages
 }
 
+// Retained for tests; the SSE transport now uses the byte-oriented twin.
+#[cfg(test)]
 fn find_sse_event_separator(buffer: &str) -> Option<(usize, usize)> {
     match (buffer.find("\n\n"), buffer.find("\r\n\r\n")) {
         (Some(lf), Some(crlf)) if crlf < lf => Some((crlf, 4)),
@@ -732,6 +734,26 @@ fn find_sse_event_separator(buffer: &str) -> Option<(usize, usize)> {
         _ => None,
     }
 }
+
+/// Byte-oriented twin of [`find_sse_event_separator`]. Used by the SSE
+/// transport so it can accumulate RAW bytes and decode only complete event
+/// blocks — a multi-byte UTF-8 char split across two network reads is never
+/// corrupted to U+FFFD (the `\n`/`\r` separators are ASCII and can never fall
+/// inside a multi-byte sequence).
+fn find_sse_event_separator_bytes(buffer: &[u8]) -> Option<(usize, usize)> {
+    let lf = buffer.windows(2).position(|w| w == b"\n\n");
+    let crlf = buffer.windows(4).position(|w| w == b"\r\n\r\n");
+    match (lf, crlf) {
+        (Some(lf), Some(crlf)) if crlf < lf => Some((crlf, 4)),
+        (Some(lf), _) => Some((lf, 2)),
+        (_, Some(crlf)) => Some((crlf, 4)),
+        _ => None,
+    }
+}
+
+/// Hard ceiling on the SSE frame-assembly buffer. A server that never emits a
+/// frame separator would otherwise grow it without bound (OOM DoS).
+pub(super) const MAX_SSE_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
 fn sse_field_value<'a>(line: &'a str, field: &str) -> Option<&'a str> {
     let value = line.strip_prefix(field)?;
@@ -831,8 +853,15 @@ impl McpConnection {
             // local Clash / Shadowsocks tunnel, etc. previously had MCP
             // HTTP traffic bypass the proxy entirely while every other
             // tool on the box (curl, npm, …) used it.
+            // `connect_timeout` bounds only the connect phase; the total request
+            // timeout is the read timeout (a sane backstop) so per-call
+            // execute_timeout can actually govern request duration. Previously
+            // this set reqwest's TOTAL `.timeout()` from connect_timeout (10s),
+            // which silently capped every request at 10s and made the per-server
+            // execute_timeout / read_timeout dead for HTTP transports.
             let mut client_builder = crate::tls::reqwest_client_builder()
-                .timeout(Duration::from_secs(connect_timeout_secs));
+                .connect_timeout(Duration::from_secs(connect_timeout_secs))
+                .timeout(Duration::from_secs(read_timeout_secs));
             let env_proxy_url = std::env::var("HTTPS_PROXY")
                 .or_else(|_| std::env::var("https_proxy"))
                 .or_else(|_| std::env::var("HTTP_PROXY"))
