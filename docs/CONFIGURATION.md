@@ -374,6 +374,18 @@ legacy top-level `base_url`, so the OpenAI-compatible provider receives it.
 provider tables in one config, `[providers.openai].model` can be used as the
 OpenAI-provider-specific override.
 
+StepFun has a first-class provider entry, so keep Coding Plan credentials and
+base URL scoped to `[providers.stepfun]`:
+
+```toml
+provider = "stepfun"
+
+[providers.stepfun]
+api_key = "YOUR_STEPFUN_API_KEY"
+base_url = "https://api.stepfun.com/step_plan/v1"
+model = "step-3.7-flash"
+```
+
 Alibaba Bailian / Model Studio DashScope Qwen routes use the same OpenAI
 provider shape:
 
