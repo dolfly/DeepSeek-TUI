@@ -527,7 +527,7 @@ pub const CONSTITUTION_OVERRIDE_FILE: &str = "prompts/constitution.md";
 pub const BASE_PROMPT_OVERRIDE_OPT_IN_ENV: &str = "CODEWHALE_ALLOW_BASE_PROMPT_OVERRIDE";
 
 /// Whether the user has explicitly opted in to base-prompt overrides.
-fn base_prompt_override_opt_in() -> bool {
+pub(crate) fn base_prompt_override_opt_in() -> bool {
     match std::env::var(BASE_PROMPT_OVERRIDE_OPT_IN_ENV) {
         Ok(v) => matches!(
             v.trim().to_ascii_lowercase().as_str(),

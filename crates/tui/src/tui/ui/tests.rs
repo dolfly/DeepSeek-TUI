@@ -2020,6 +2020,25 @@ fn setup_checkpoint_waits_for_onboarding_and_skip_flag() {
     app.onboarding = OnboardingState::None;
     assert!(!open_setup_checkpoint_if_due(&mut app, &config, true));
     assert!(app.view_stack.is_empty());
+    let state = codewhale_config::SetupState::load()
+        .expect("load setup state")
+        .expect("setup state");
+    assert_eq!(
+        state.constitution_checkpoint_completed_for.as_deref(),
+        Some(crate::tui::setup::CONSTITUTION_CHECKPOINT_VERSION)
+    );
+    assert_eq!(
+        state.constitution_choice,
+        codewhale_config::ConstitutionChoice::Deferred
+    );
+    assert_eq!(
+        state.status(codewhale_config::SetupStep::Constitution),
+        codewhale_config::StepStatus::Deferred
+    );
+    assert!(
+        !open_setup_checkpoint_if_due(&mut app, &config, false),
+        "deferred skip record should suppress the update checkpoint on the next launch"
+    );
 }
 
 #[test]

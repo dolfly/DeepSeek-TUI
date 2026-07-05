@@ -583,8 +583,18 @@ fn drain_terminal_input_queue(
 }
 
 fn open_setup_checkpoint_if_due(app: &mut App, config: &Config, skip_onboarding: bool) -> bool {
-    if skip_onboarding
-        || app.onboarding != crate::tui::app::OnboardingState::None
+    if skip_onboarding {
+        if crate::tui::setup::should_open_update_checkpoint(app, config) {
+            if let Err(err) = crate::tui::setup::defer_update_checkpoint_for_app(app, config) {
+                tracing::warn!(
+                    target: "tui::setup",
+                    "failed to record deferred setup checkpoint: {err}"
+                );
+            }
+        }
+        return false;
+    }
+    if app.onboarding != crate::tui::app::OnboardingState::None
         || app.view_stack.top_kind() == Some(ModalKind::SetupWizard)
         || !crate::tui::setup::should_open_update_checkpoint(app, config)
     {
@@ -5470,6 +5480,7 @@ async fn handle_setup_constitution_model_draft(
     app: &mut App,
     config: &Config,
     draft: crate::tui::setup::GuidedConstitutionDraft,
+    freeform_note: Option<String>,
     locale: crate::localization::Locale,
 ) {
     // Spawn the draft off the event loop (same pattern as the fleet drafter,
@@ -5513,6 +5524,7 @@ async fn handle_setup_constitution_model_draft(
                 &client,
                 &request_model,
                 draft,
+                freeform_note,
                 locale,
             ),
         )
@@ -10035,8 +10047,13 @@ async fn handle_view_events(
                         Some(format!("User constitution could not be saved: {err}"));
                 }
             },
-            ViewEvent::SetupConstitutionModelDraftRequested { draft, locale } => {
-                handle_setup_constitution_model_draft(app, config, draft, locale).await;
+            ViewEvent::SetupConstitutionModelDraftRequested {
+                draft,
+                freeform_note,
+                locale,
+            } => {
+                handle_setup_constitution_model_draft(app, config, draft, freeform_note, locale)
+                    .await;
             }
             ViewEvent::FleetProfileModelDraftRequested {
                 role,

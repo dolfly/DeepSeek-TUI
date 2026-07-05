@@ -4899,6 +4899,50 @@ fn external_prompt_wording_never_changes_effective_mode_or_authority() {
 }
 
 #[test]
+fn external_write_instruction_supersedes_prior_review_only_policy() {
+    let review_only = effective_input_policy(
+        UserInputProvenance::ExternalUser,
+        AppMode::Yolo,
+        "你在帮我看看 外卖部分还哪里没有使用多语言 我看看要不要加",
+        true,
+        true,
+        true,
+        crate::tui::approval::ApprovalMode::Bypass,
+    );
+    assert_eq!(review_only.mode, AppMode::Plan);
+    assert!(!review_only.trust_mode);
+    assert!(!review_only.auto_approve);
+    assert!(
+        review_only
+            .status
+            .as_deref()
+            .is_some_and(|status| { status.contains("read-only Plan tools") })
+    );
+
+    let later_user_instruction = effective_input_policy(
+        UserInputProvenance::ExternalUser,
+        AppMode::Yolo,
+        "需要修复下",
+        true,
+        true,
+        true,
+        crate::tui::approval::ApprovalMode::Bypass,
+    );
+    assert_eq!(later_user_instruction.mode, AppMode::Yolo);
+    assert!(later_user_instruction.allow_shell);
+    assert!(later_user_instruction.trust_mode);
+    assert!(later_user_instruction.auto_approve);
+    assert_eq!(
+        later_user_instruction.approval_mode,
+        crate::tui::approval::ApprovalMode::Bypass
+    );
+    assert!(
+        later_user_instruction.status.is_none(),
+        "a fresh external write instruction must not inherit the prior review-only downgrade"
+    );
+}
+
+#[test]
 fn turn_metadata_includes_plan_mode_policy() {
     let tmp = tempdir().expect("tempdir");
     let config = EngineConfig {
@@ -5796,6 +5840,59 @@ fn filter_tool_call_delta_strips_fullwidth_dsml_invoke_fixture() {
     assert!(!visible.contains("DSML"));
     assert!(!visible.contains("read_file"));
     assert!(!visible.contains("backend/open_webui"));
+}
+
+#[test]
+fn filter_tool_call_delta_strips_ascii_dsml_invoke_fixture() {
+    let mut in_block = false;
+    let visible = filter_tool_call_delta(
+        "visible prefix <|DSML|tool_calls>\n\
+         <|DSML|invoke name=\"read_file\">\n\
+         <|DSML|parameter name=\"path\" string=\"true\">backend/open_webui/utils/auth.py</|DSML|parameter>\n\
+         </|DSML|invoke>\n\
+         </|DSML|tool_calls> visible suffix",
+        &mut in_block,
+    );
+
+    assert!(!in_block);
+    assert_eq!(visible, "visible prefix  visible suffix");
+    assert!(!visible.contains("DSML"));
+    assert!(!visible.contains("read_file"));
+    assert!(!visible.contains("backend/open_webui"));
+}
+
+#[test]
+fn filter_tool_call_delta_carries_split_fullwidth_dsml_marker() {
+    let mut state = ToolCallDeltaFilterState::default();
+
+    let visible_a = filter_tool_call_delta_with_state("visible prefix <｜DS", &mut state);
+    assert_eq!(visible_a, "visible prefix ");
+
+    let visible_b = filter_tool_call_delta_with_state(
+        "ML｜tool_calls>\n<｜DSML｜invoke name=\"read_file\">",
+        &mut state,
+    );
+    assert!(
+        visible_b.is_empty(),
+        "split DSML opener leaked: {visible_b:?}"
+    );
+
+    let visible_c = filter_tool_call_delta_with_state(
+        "</｜DSML｜invoke>\n</｜DSML｜tool_calls> visible suffix",
+        &mut state,
+    );
+    assert_eq!(visible_c, " visible suffix");
+}
+
+#[test]
+fn filter_tool_call_delta_flushes_clean_partial_marker_prefix() {
+    let mut state = ToolCallDeltaFilterState::default();
+
+    let visible = filter_tool_call_delta_with_state("ordinary text ending in <", &mut state);
+    assert_eq!(visible, "ordinary text ending in ");
+
+    let flushed = flush_tool_call_delta_state(&mut state);
+    assert_eq!(flushed, "<");
 }
 
 #[test]
