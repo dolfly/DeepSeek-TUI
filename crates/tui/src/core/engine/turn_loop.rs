@@ -2470,10 +2470,19 @@ impl Engine {
             let mut step_error_tool_names: Vec<String> = Vec::new();
             let mut step_error_tool_inputs: Vec<serde_json::Value> = Vec::new();
             let mut stop_after_plan_tool = false;
+            // #dogfood 0.8.67: if the model mutates the goal mid-turn via
+            // create_goal/update_goal, push the change to the sidebar right after
+            // this tool batch instead of waiting for turn end — otherwise the
+            // sidebar "Goal:" line stays stale for the whole (possibly long)
+            // goal-loop turn while get_goal already reflects the new objective.
+            let mut goal_tool_ran = false;
 
             for outcome in outcomes.into_iter().flatten() {
                 let tool_input = outcome.input.clone();
                 let tool_name_for_ws = outcome.name.clone();
+                if matches!(outcome.name.as_str(), "create_goal" | "update_goal") {
+                    goal_tool_ran = true;
+                }
                 let should_stop_this_turn =
                     should_stop_after_plan_tool(mode, &outcome.name, &outcome.result);
 
@@ -2569,6 +2578,13 @@ impl Engine {
 
                 turn.record_tool_call();
                 stop_after_plan_tool |= should_stop_this_turn;
+            }
+
+            // Reflect a mid-turn goal change on the sidebar immediately (idempotent:
+            // emit_goal_updated only sends when an objective is set, and the UI
+            // applies it behind a `changed` guard).
+            if goal_tool_ran {
+                self.emit_goal_updated().await;
             }
 
             if stop_after_plan_tool {
