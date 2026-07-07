@@ -36,6 +36,7 @@ impl RegisterCommand for WorkflowCmd {
 /// what makes opt-in orchestration work well: the user's invocation is the
 /// authorization, fan-out scales to the ask, and receipts close the loop.
 const ORCHESTRATION_CONTRACT: &str = "Author a workflow script for the `workflow` tool (task()/parallel()/pipeline()/phase()/log()); \
+     you are the fan-in owner — fan out, wait for receipts, aggregate, verify, and synthesize one result. \
      scale the fan-out to the size of the ask — a quick check gets a few tasks, an audit gets a wider sweep. \
      Prefer pipeline() over barriers so items flow stage-to-stage without waiting. \
      Use responseSchema on task() when you need structured child output; schema mismatches fail loudly in the run receipt. \

@@ -83,12 +83,32 @@ can run on top of those modes when the task needs a continuous workflow.
   when a phase needs many workers at once, Workflow dispatches them as a
   Fleet-backed run (durable workers, receipts, goal re-dispatch) rather than
   reviving prompt-only sub-agent fanout.
+- **Fan-in is mandatory:** no fan-out without an owner that waits, aggregates,
+  verifies, and synthesizes one result. The operator should depend on one
+  manager or workflow receipt, not N loose `agent` children scattered across
+  the transcript.
 
 UI guidance: keep the main transcript calm. A Workflow run should appear as a
 compact progress card plus Work/Agents sidebar rows with phase names, worker
 counts, receipts, and nested indentation for child workers. Use the whale mark
 sparingly as an active header/status signal; avoid repeating emoji-heavy rows
 for every worker.
+
+## Manager-owned operations
+
+When parallel work must return one combined answer, use a manager-owned
+operation instead of a flat `agent` fan-out:
+
+1. **Cast one manager** (operator or workflow orchestrator).
+2. **Fan out** child tasks through `workflow` (`task()`, `parallel()`,
+   `pipeline()`, `phase()`) or a single manager session that owns the children.
+3. **Wait** for child receipts or completion events.
+4. **Aggregate and verify** load-bearing claims before treating them as facts.
+5. **Synthesize** one result the operator can depend on.
+
+Raw `agent` fan-out is appropriate only for independent, fire-and-forget work
+where no single fan-in result is required. If results must be merged, compared,
+or verified, route through `workflow` so the manager owns fan-in.
 
 ## Workflow on Fleet
 
