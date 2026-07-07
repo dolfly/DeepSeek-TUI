@@ -456,9 +456,13 @@ fn read_pdf(path: &Path, pages: Option<&str>) -> Result<ToolResult, ToolError> {
         read_pdf_via_pdftotext(path, page_range)
     } else {
         #[cfg(feature = "pdf")]
-        { read_pdf_via_pdf_extract(path, page_range) }
+        {
+            read_pdf_via_pdf_extract(path, page_range)
+        }
         #[cfg(not(feature = "pdf"))]
-        { read_pdf_via_pdftotext(path, page_range) }
+        {
+            read_pdf_via_pdftotext(path, page_range)
+        }
     }
 }
 

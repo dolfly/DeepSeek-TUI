@@ -181,10 +181,7 @@ pub fn footer_agents_chip(running: usize, locale: Locale) -> Vec<Span<'static>> 
     } else {
         tr(locale, MessageId::FooterAgentsPlural).replace("{count}", &running.to_string())
     };
-    vec![Span::styled(
-        text,
-        Style::default().fg(palette::WHALE_INFO),
-    )]
+    vec![Span::styled(text, Style::default().fg(palette::WHALE_INFO))]
 }
 
 /// Build the cumulative-elapsed chip ("worked 3h 12m") for the

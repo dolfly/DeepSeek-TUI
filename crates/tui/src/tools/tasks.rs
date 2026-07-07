@@ -594,16 +594,21 @@ impl ToolSpec for PrAttemptRecordTool {
 
     async fn execute(&self, input: Value, context: &ToolContext) -> Result<ToolResult, ToolError> {
         let task_id = task_id_from_input_or_context(&input, context)?;
-        let base_sha = git_output(&context.workspace, &["rev-parse", "HEAD"]).await.ok();
+        let base_sha = git_output(&context.workspace, &["rev-parse", "HEAD"])
+            .await
+            .ok();
         let head_sha = base_sha.clone();
-        let branch = git_output(&context.workspace, &["rev-parse", "--abbrev-ref", "HEAD"]).await.ok();
+        let branch = git_output(&context.workspace, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .await
+            .ok();
         let diff = git_output(&context.workspace, &["diff", "--binary", "--no-color"]).await?;
         if diff.trim().is_empty() {
             return Ok(ToolResult::error(
                 "No working-tree diff to record as an attempt.",
             ));
         }
-        let changed_files = git_output(&context.workspace, &["diff", "--name-only"]).await?
+        let changed_files = git_output(&context.workspace, &["diff", "--name-only"])
+            .await?
             .lines()
             .filter(|line| !line.trim().is_empty())
             .map(ToString::to_string)

@@ -722,7 +722,10 @@ impl Renderable for ComposerWidget<'_> {
                             (Some("↵ offline queue".to_string()), palette::STATUS_WARNING)
                         } else {
                             let label = if queue_count > 0 {
-                                format!("↵ queue ({} waiting, double-↵ to steer)", queue_count.saturating_add(1))
+                                format!(
+                                    "↵ queue ({} waiting, double-↵ to steer)",
+                                    queue_count.saturating_add(1)
+                                )
                             } else {
                                 "↵ queue (double-↵ to steer)".to_string()
                             };
@@ -730,10 +733,9 @@ impl Renderable for ComposerWidget<'_> {
                         }
                     }
                     // Steer reached via double-tap Enter or Ctrl+Enter override.
-                    SubmitDisposition::Steer => (
-                        Some("↵ steering".to_string()),
-                        palette::WHALE_INFO,
-                    ),
+                    SubmitDisposition::Steer => {
+                        (Some("↵ steering".to_string()), palette::WHALE_INFO)
+                    }
                     SubmitDisposition::QueueFollowUp => (
                         Some("↵ queued (double-↵ to steer)".to_string()),
                         palette::TEXT_MUTED,

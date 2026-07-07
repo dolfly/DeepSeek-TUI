@@ -9090,7 +9090,10 @@ async fn submit_or_steer_message(
     engine_handle: &EngineHandle,
     message: QueuedMessage,
 ) -> Result<()> {
-    match app.enter_with_double_tap().unwrap_or(SubmitDisposition::Immediate) {
+    match app
+        .enter_with_double_tap()
+        .unwrap_or(SubmitDisposition::Immediate)
+    {
         SubmitDisposition::Immediate => {
             dispatch_user_message(app, config, engine_handle, message).await
         }
