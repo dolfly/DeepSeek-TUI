@@ -832,9 +832,9 @@ impl StateStore {
         time_delta_seconds: i64,
         now: i64,
     ) -> Result<Option<ThreadGoalRecord>> {
-        let conn = self.conn()?;
-        let changed = conn
-            .execute(
+        let changed = {
+            let conn = self.conn()?;
+            conn.execute(
                 r#"
                 UPDATE thread_goals
                 SET tokens_used = tokens_used + ?2,
@@ -844,7 +844,8 @@ impl StateStore {
                 "#,
                 params![thread_id, token_delta, time_delta_seconds, now],
             )
-            .context("failed to record thread goal usage")?;
+            .context("failed to record thread goal usage")?
+        };
         if changed == 0 {
             return Ok(None);
         }
@@ -861,9 +862,9 @@ impl StateStore {
         thread_id: &str,
         now: i64,
     ) -> Result<Option<ThreadGoalRecord>> {
-        let conn = self.conn()?;
-        let changed = conn
-            .execute(
+        let changed = {
+            let conn = self.conn()?;
+            conn.execute(
                 r#"
                 UPDATE thread_goals
                 SET continuation_count = continuation_count + 1,
@@ -872,7 +873,8 @@ impl StateStore {
                 "#,
                 params![thread_id, now],
             )
-            .context("failed to record thread goal continuation")?;
+            .context("failed to record thread goal continuation")?
+        };
         if changed == 0 {
             return Ok(None);
         }

@@ -159,6 +159,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed paused goals silently un-freezing their sidebar timer: usage keeps
   accruing while paused, and the next goal snapshot used to clear the frozen
   instant. Paused goals now stay frozen until an explicit resume.
+- Fixed durable `/goal` progress accounting so usage and continuation updates
+  release the shared SQLite connection before re-reading the updated goal,
+  unblocking resumed goal loops and full workspace release tests.
 - Fixed a scheduled-automation race where deleting an automation while its
   run was being enqueued left the already-created task running untracked;
   the run record is now persisted unconditionally.
