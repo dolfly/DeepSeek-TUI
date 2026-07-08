@@ -2104,4 +2104,22 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn paragraph_wrap_keeps_cjk_transcript_within_narrow_widths() {
+        // The seed cases cover 80/100/120; narrow terminals (resize / small
+        // panes) are the other half of #3488's terminal-width lane. A CJK
+        // transcript paragraph must still wrap inside tiny windows without
+        // overflowing the border or dropping content.
+        let text = "实时输出结果显示正常".repeat(6); // 60 Han glyphs, 120 cols
+        for &width in &[20usize, 40] {
+            let rendered = render_paragraph_for_test(&text, width);
+            assert_rendered_widths_fit(&rendered, width, "narrow cjk transcript");
+            assert_eq!(
+                rendered_text(&rendered),
+                text,
+                "width={width}: CJK transcript content changed while wrapping"
+            );
+        }
+    }
 }
