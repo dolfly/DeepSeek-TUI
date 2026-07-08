@@ -428,9 +428,7 @@ pub(crate) fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> Vec<ViewEv
                         });
                         match cell_index {
                             Some(cell_index) => {
-                                crate::tui::ui::activity_detail::open_details_pager_for_cell(
-                                    app, cell_index,
-                                );
+                                open_details_pager_for_cell(app, cell_index);
                             }
                             None => {
                                 app.status_message = Some(format!(

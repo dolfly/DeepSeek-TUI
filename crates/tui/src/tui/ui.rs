@@ -12503,7 +12503,7 @@ fn parse_semver(v: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
-pub(crate) mod activity_detail;
+mod activity_detail;
 
 #[cfg(test)]
 mod tests;
