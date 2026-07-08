@@ -54,6 +54,7 @@ pub enum ProviderKind {
     Arcee,
     #[serde(alias = "siliconflow-cn", alias = "siliconflow-CN")]
     SiliconflowCN,
+    #[serde(alias = "moonshot-ai", alias = "moonshotai", alias = "moonshot_ai")]
     Moonshot,
     Sglang,
     Vllm,

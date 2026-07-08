@@ -341,7 +341,10 @@ provider!(
     DEFAULT_MOONSHOT_MODEL,
     ["MOONSHOT_API_KEY", "KIMI_API_KEY"],
     "moonshot",
-    aliases: ["moonshot-ai", "kimi", "kimi-k2"]
+    // `moonshotai` is the id Models.dev publishes for Moonshot/Kimi; without
+    // it a live/full Models.dev catalog row keyed `moonshotai` would fail to
+    // normalize onto ProviderKind::Moonshot (Refs #4186).
+    aliases: ["moonshot-ai", "moonshotai", "moonshot_ai", "kimi", "kimi-k2"]
 );
 provider!(
     Sglang,

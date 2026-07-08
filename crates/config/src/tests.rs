@@ -3368,11 +3368,12 @@ fn provider_kind_parses_openrouter_and_novita_aliases() {
 }
 
 /// Models.dev publishes provider ids that do not always match CodeWhale's
-/// canonical id (`fireworks-ai`, `togetherai`, `novita-ai`). These MUST
-/// normalize onto the right [`ProviderKind`] via [`ProviderKind::parse`], which
-/// is the seam `ModelReferenceCard::from_offering` uses to label a live-catalog
-/// row's provider kind. A miss here means Fireworks/Together/Novita models from
-/// the live Models.dev catalog land under an `unknown` kind (Refs #4186).
+/// canonical id (`fireworks-ai`, `togetherai`, `novita-ai`, `moonshotai`).
+/// These MUST normalize onto the right [`ProviderKind`] via
+/// [`ProviderKind::parse`], which is the seam `ModelReferenceCard::from_offering`
+/// uses to label a live-catalog row's provider kind. A miss here means
+/// Fireworks/Together/Novita/Moonshot models from the live Models.dev catalog
+/// land under an `unknown` kind (Refs #4186).
 #[test]
 fn provider_kind_normalizes_models_dev_provider_ids() {
     let cases = [
@@ -3382,12 +3383,19 @@ fn provider_kind_normalizes_models_dev_provider_ids() {
         ("together_ai", ProviderKind::Together),
         ("novita-ai", ProviderKind::Novita),
         ("novita_ai", ProviderKind::Novita),
+        // Live Models.dev key for Moonshot/Kimi (verified 2026-07-08).
+        ("moonshotai", ProviderKind::Moonshot),
+        ("moonshot-ai", ProviderKind::Moonshot),
+        ("moonshot_ai", ProviderKind::Moonshot),
+        ("nvidia", ProviderKind::NvidiaNim),
+        ("xiaomi", ProviderKind::XiaomiMimo),
         ("deepinfra", ProviderKind::Deepinfra),
         ("siliconflow", ProviderKind::Siliconflow),
         // Models.dev spells the China endpoint `siliconflow-cn`; CodeWhale's
         // canonical id is `siliconflow-CN` and `parse` is case-insensitive.
         ("siliconflow-cn", ProviderKind::SiliconflowCN),
         ("openrouter", ProviderKind::Openrouter),
+        ("longcat", ProviderKind::LongCat),
     ];
     for (models_dev_id, expected) in cases {
         assert_eq!(
@@ -3398,11 +3406,13 @@ fn provider_kind_normalizes_models_dev_provider_ids() {
     }
 
     // The separator-free Models.dev ids must also deserialize from config TOML,
-    // so a `provider = "togetherai"` / `"novita-ai"` line resolves identically.
+    // so a `provider = "togetherai"` / `"novita-ai"` / `"moonshotai"` line
+    // resolves identically.
     for (alias, expected) in [
         ("togetherai", ProviderKind::Together),
         ("novita-ai", ProviderKind::Novita),
         ("fireworks-ai", ProviderKind::Fireworks),
+        ("moonshotai", ProviderKind::Moonshot),
     ] {
         let parsed: ConfigToml =
             toml::from_str(&format!("provider = \"{alias}\"")).expect("models.dev id alias");
