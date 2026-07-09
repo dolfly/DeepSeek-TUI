@@ -632,12 +632,9 @@ use std::os::unix::fs::PermissionsExt;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::TempDir;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn auth_mode_accepts_oauth_aliases() {
@@ -661,7 +658,7 @@ mod tests {
 
     #[test]
     fn loads_fresh_token_from_grok_auth_json() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_test_env();
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
         let future = rfc3339_from_now(3600);
@@ -677,7 +674,8 @@ mod tests {
             }
         });
         fs::write(&path, serde_json::to_vec_pretty(&file).unwrap()).unwrap();
-        // SAFETY: serialized by ENV_LOCK; restored below.
+        // SAFETY: serialized by the process-wide test environment lock;
+        // restored below.
         unsafe {
             std::env::set_var("GROK_AUTH_PATH", &path);
         }
@@ -692,6 +690,7 @@ mod tests {
 
     #[test]
     fn missing_file_message_mentions_oauth_paths() {
+        let _guard = crate::test_support::lock_test_env();
         let msg = missing_auth_message();
         assert!(msg.contains("xAI OAuth credentials not found"), "{msg}");
         assert!(msg.contains("auth_mode"), "{msg}");
@@ -741,7 +740,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::lock_test_env();
         let dir = TempDir::new().unwrap();
         let auth_path = dir.path().join("grok-auth.json");
         unsafe {
