@@ -998,3 +998,28 @@ async fn plain_scripts_are_untouched_by_export_desugaring() {
     .unwrap();
     assert_eq!(value, json!(19));
 }
+
+#[tokio::test]
+async fn export_default_examples_inside_multiline_text_are_not_desugared() {
+    let driver = Arc::new(FakeDriver::new());
+    let value = run(
+        &driver,
+        r#"
+const template = `
+export default async function (args) {
+  return args;
+}
+`;
+/*
+export default function () {
+  return "comment example";
+}
+*/
+return template.includes("export default async function");
+"#,
+        json!(null),
+    )
+    .await
+    .unwrap();
+    assert_eq!(value, json!(true));
+}

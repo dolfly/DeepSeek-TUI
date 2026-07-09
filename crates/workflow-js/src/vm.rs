@@ -382,28 +382,113 @@ async fn run_in_ctx(
 /// the `args` global when it is a function, and its result becomes the run
 /// result; a non-function default export is returned as-is.
 fn desugar_export_default(source: &str) -> String {
-    let Some(line_idx) = source
-        .lines()
-        .position(|line| line.trim_start().starts_with("export default"))
-    else {
+    const EXPORT_DEFAULT: &str = "export default";
+    let Some(offset) = line_leading_export_default(source) else {
         return source.to_string();
     };
-    let mut lines: Vec<&str> = source.lines().collect();
-    let rewritten =
-        lines[line_idx].replacen("export default", "globalThis.__workflow_default =", 1);
-    let mut out = String::new();
-    for (idx, line) in lines.iter_mut().enumerate() {
-        if idx == line_idx {
-            out.push_str(&rewritten);
-        } else {
-            out.push_str(line);
-        }
-        out.push('\n');
-    }
+    let mut out = source.to_string();
+    out.replace_range(
+        offset..offset + EXPORT_DEFAULT.len(),
+        "globalThis.__workflow_default =",
+    );
+    out.push('\n');
     out.push_str(
         ";{\n  const __wf_default = globalThis.__workflow_default;\n  delete globalThis.__workflow_default;\n  if (typeof __wf_default === \"function\") {\n    return await __wf_default(args);\n  }\n  if (__wf_default !== undefined) {\n    return __wf_default;\n  }\n}\n",
     );
     out
+}
+
+/// Return the byte offset of a line-leading `export default` token that is
+/// actual JavaScript syntax, not text inside a string, template literal, or
+/// comment. This intentionally recognizes only the documented authoring shape
+/// instead of attempting to implement a general JavaScript module parser.
+fn line_leading_export_default(source: &str) -> Option<usize> {
+    const EXPORT_DEFAULT: &[u8] = b"export default";
+    let bytes = source.as_bytes();
+    let mut idx = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    let mut line_has_only_whitespace = true;
+
+    while idx < bytes.len() {
+        let byte = bytes[idx];
+
+        if line_comment {
+            if byte == b'\n' {
+                line_comment = false;
+                line_has_only_whitespace = true;
+            }
+            idx += 1;
+            continue;
+        }
+
+        if block_comment {
+            if byte == b'*' && bytes.get(idx + 1) == Some(&b'/') {
+                block_comment = false;
+                line_has_only_whitespace = false;
+                idx += 2;
+                continue;
+            }
+            if byte == b'\n' {
+                line_has_only_whitespace = true;
+            } else if !byte.is_ascii_whitespace() {
+                line_has_only_whitespace = false;
+            }
+            idx += 1;
+            continue;
+        }
+
+        if let Some(active_quote) = quote {
+            if byte == b'\n' {
+                line_has_only_whitespace = true;
+                escaped = false;
+            } else {
+                if !byte.is_ascii_whitespace() {
+                    line_has_only_whitespace = false;
+                }
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == active_quote {
+                    quote = None;
+                }
+            }
+            idx += 1;
+            continue;
+        }
+
+        if byte == b'\n' {
+            line_has_only_whitespace = true;
+            idx += 1;
+            continue;
+        }
+        if line_has_only_whitespace && byte.is_ascii_whitespace() {
+            idx += 1;
+            continue;
+        }
+        if line_has_only_whitespace && bytes[idx..].starts_with(EXPORT_DEFAULT) {
+            return Some(idx);
+        }
+
+        line_has_only_whitespace = false;
+        if byte == b'/' && bytes.get(idx + 1) == Some(&b'/') {
+            line_comment = true;
+            idx += 2;
+        } else if byte == b'/' && bytes.get(idx + 1) == Some(&b'*') {
+            block_comment = true;
+            idx += 2;
+        } else {
+            if matches!(byte, b'\'' | b'"' | b'`') {
+                quote = Some(byte);
+            }
+            idx += 1;
+        }
+    }
+
+    None
 }
 
 fn script_error(cancel: &CancelHandle, err: CaughtError<'_>) -> WorkflowJsError {
