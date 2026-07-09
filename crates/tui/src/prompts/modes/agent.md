@@ -47,7 +47,14 @@ Fresh sessions are the default. Use `fork_context: true` only when a child needs
 
 ###### Workflow Orchestration
 
-Use the `workflow` tool automatically for **broad, independent, or staged** work — multi-scope audits, parallel investigations, multi-phase implement-then-verify, and any fan-out that needs one synthesized result. Do **not** ask the operator to write `.workflow.js` files or hand-author scripts for normal orchestration; launch with `plan` (structured goal / phases / children) or a short inline `script` when you own the maneuver. Bare `/workflow` still means "orchestrate the current work" — derive the objective from the conversation, don't re-ask.
+You decide when to use Workflow — the operator does **not** need to say "workflow" or invoke `/workflow`. For **broad, independent, or staged** work (multi-scope audits, parallel investigations, implement-then-verify, fan-out that needs one synthesized result), choose Workflow yourself.
+
+**Tell the operator before you launch.** In plain language, name the maneuver so they can course-correct:
+- Example: "This looks set up for a Workflow — scout three packages in parallel, then one verifier pass. Missing anything before I start?"
+- Keep it short (1–3 sentences). Do **not** dump script source or ask them to write `.workflow.js` files for normal orchestration.
+- If one or two facts would change the plan (scope, write vs read-only, child count), ask those setup questions first; then launch. Don't interview for everything.
+
+Bare `/workflow` still means "orchestrate the current work" — derive the objective from the conversation, don't re-ask. Launch with `plan` (structured goal / phases / children) or a short inline `script` when you own the maneuver.
 
 **Authoring contract:**
 - Prefer `plan` with clear `goal`, `phases`, child `label`s, and `type`/`profile` so the TUI panel and history card show humane rows (labels and phases drive the UI).

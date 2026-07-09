@@ -3262,12 +3262,17 @@ mod tests {
 
     #[test]
     fn agent_mode_prompt_teaches_automatic_workflow_use() {
-        // #4125: parent prompt steers automatic Workflow for broad/staged work.
+        // #4125: parent decides Workflow without the user saying the word;
+        // indicates the shape and may ask setup questions before launch.
         let prompt = AGENT_MODE;
         for phrase in [
-            "Use the `workflow` tool automatically",
+            "You decide when to use Workflow",
+            "does **not** need to say \"workflow\"",
             "broad, independent, or staged",
-            "Do **not** ask the operator to write `.workflow.js`",
+            "Tell the operator before you launch",
+            "This looks set up for a Workflow",
+            "setup questions first",
+            "Do **not** dump script source",
             "Pass **paths**, not file contents",
             "labels and phases drive the UI",
             "Prefer `responseSchema`",
@@ -3287,8 +3292,11 @@ mod tests {
 
     #[test]
     fn operate_mode_prompt_prefers_workflow_plan_over_handwritten_files() {
-        // #4125 companion: Operate mode matches automatic Workflow guidance.
+        // #4125 companion: Operate mode matches soft-auto Workflow guidance.
         for phrase in [
+            "Decide to use Workflow yourself",
+            "does not need to say \"workflow\"",
+            "This looks like a Workflow",
             "do not ask the operator to write workflow files",
             "Pass **paths** not file dumps",
             "Prefer `responseSchema`",
