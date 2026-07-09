@@ -47,7 +47,16 @@ Fresh sessions are the default. Use `fork_context: true` only when a child needs
 
 ###### Workflow Orchestration
 
-The `workflow` tool is opt-in: the user invoking `/workflow` (or asking for orchestration) is the authorization. Bare `/workflow` means "orchestrate the current work" — derive the objective from the conversation, don't ask again. Use it whenever dependent parallel work needs one synthesized result. Scale fan-out to the ask, prefer `pipeline()` over barriers, and use `responseSchema` for structured child output — a mismatch fails the run, other failures drop a `parallel()` slot to `null` (filter those). Wait for receipts, verify findings, and close with one compact summary.
+Use the `workflow` tool automatically for **broad, independent, or staged** work — multi-scope audits, parallel investigations, multi-phase implement-then-verify, and any fan-out that needs one synthesized result. Do **not** ask the operator to write `.workflow.js` files or hand-author scripts for normal orchestration; launch with `plan` (structured goal / phases / children) or a short inline `script` when you own the maneuver. Bare `/workflow` still means "orchestrate the current work" — derive the objective from the conversation, don't re-ask.
+
+**Authoring contract:**
+- Prefer `plan` with clear `goal`, `phases`, child `label`s, and `type`/`profile` so the TUI panel and history card show humane rows (labels and phases drive the UI).
+- Pass **paths**, not file contents, into child prompts and plan metadata — children read the workspace themselves.
+- Scale fan-out to the ask; prefer `pipeline()` over barrier-heavy graphs.
+- Prefer `responseSchema` on tasks that must return structured fields; a schema mismatch fails the run. Other failures drop a `parallel()` slot to `null` (filter those).
+- Wait for receipts, verify load-bearing findings, and close with one compact synthesized summary the operator can depend on.
+
+Keep raw `agent` for independent fire-and-forget slices only; if results must combine, verify, or ship as one answer, use Workflow.
 
 ###### Large Context Tools
 
