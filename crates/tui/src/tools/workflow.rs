@@ -83,6 +83,7 @@ impl WorkflowRunController {
 
     fn cancel(&self) {
         self.vm_cancel.cancel();
+        self.driver.finalize_running_tasks_cancelled();
         self.driver.force_cancel_all();
         if let Ok(mut guard) = self.run_handle.lock()
             && let Some(handle) = guard.take()
@@ -1840,9 +1841,6 @@ impl SubAgentWorkflowDriver {
             .lock()
             .map(|ids| ids.clone())
             .unwrap_or_default();
-        for id in &ids {
-            self.record_task_completion(id, &TaskCompletion::Cancelled);
-        }
         if let Ok(mut permits) = self.spawn_permits.lock() {
             permits.clear();
         }
@@ -1851,6 +1849,17 @@ impl SubAgentWorkflowDriver {
             for (_, waiter) in state.waiters.drain() {
                 let _ = waiter.send(TaskCompletion::Cancelled);
             }
+        }
+    }
+
+    fn finalize_running_tasks_cancelled(&self) {
+        let ids = self
+            .child_ids
+            .lock()
+            .map(|ids| ids.clone())
+            .unwrap_or_default();
+        for id in &ids {
+            self.record_task_completion(id, &TaskCompletion::Cancelled);
         }
     }
 
