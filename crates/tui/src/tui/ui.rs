@@ -2524,6 +2524,7 @@ async fn run_event_loop(
                         }
                     }
                     EngineEvent::TurnStarted { turn_id } => {
+                        app.ocean_completion_started_at = None;
                         app.suppress_stream_events_until_turn_complete = false;
                         app.is_loading = true;
                         app.offline_mode = false;
@@ -2635,12 +2636,17 @@ async fn run_event_loop(
                         app.user_scrolled_during_stream = false;
                         app.runtime_turn_status = Some(match status {
                             crate::core::events::TurnOutcomeStatus::Completed => {
+                                app.ocean_completion_started_at = Some(Instant::now());
                                 "completed".to_string()
                             }
                             crate::core::events::TurnOutcomeStatus::Interrupted => {
+                                app.ocean_completion_started_at = None;
                                 "interrupted".to_string()
                             }
-                            crate::core::events::TurnOutcomeStatus::Failed => "failed".to_string(),
+                            crate::core::events::TurnOutcomeStatus::Failed => {
+                                app.ocean_completion_started_at = None;
+                                "failed".to_string()
+                            }
                         });
                         if matches!(
                             status,
@@ -3623,6 +3629,12 @@ async fn run_event_loop(
                 .as_ref()
                 .is_none_or(crate::tui::active_cell::ActiveCell::is_empty)
             && !app.is_loading;
+        let underwater_completion_motion = !app.low_motion
+            && app.fancy_animations
+            && matches!(app.runtime_turn_status.as_deref(), Some("completed"))
+            && app
+                .ocean_completion_started_at
+                .is_some_and(|started| started.elapsed() < Duration::from_millis(800));
         let status_motion = should_tick_status_animation(
             app,
             has_running_agents,
@@ -3634,7 +3646,7 @@ async fn run_event_loop(
         } else {
             125
         };
-        if (status_motion || underwater_idle_motion)
+        if (status_motion || underwater_idle_motion || underwater_completion_motion)
             && last_status_frame.elapsed() >= Duration::from_millis(animation_interval_ms)
         {
             if streaming_thinking::animate_pending_translation(
@@ -9959,18 +9971,14 @@ fn render(f: &mut Frame, app: &mut App, config: &Config) {
     let workflow_panel_height =
         desired_workflow_panel_height.min(auxiliary_budget.saturating_sub(preview_height));
 
-    let (composer_slot, footer_slot) = if classic_shell { (4, 5) } else { (5, 4) };
-    let tail_constraints = if classic_shell {
-        [
-            Constraint::Length(composer_height),
-            Constraint::Length(footer_height),
-        ]
-    } else {
-        [
-            Constraint::Length(footer_height),
-            Constraint::Length(composer_height),
-        ]
-    };
+    // Composer first, footer last: the phase line is the shell's stable bottom
+    // anchor. Reversing this order in the underwater path pinched the prompt
+    // between two chrome rows and made compact terminals feel stacked.
+    let (composer_slot, footer_slot) = (4, 5);
+    let tail_constraints = [
+        Constraint::Length(composer_height),
+        Constraint::Length(footer_height),
+    ];
 
     let body_chunks = Layout::default()
         .direction(Direction::Vertical)

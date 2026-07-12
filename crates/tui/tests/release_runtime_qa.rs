@@ -220,6 +220,123 @@ fn type_and_tab(harness: &mut Harness, text: &str) -> Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn underwater_footer_moves_from_working_through_one_shot_completion() -> Result<()> {
+    let _guard = RELEASE_RUNTIME_QA_LOCK.lock().await;
+    let server = MockServer::start().await;
+    mount_models(&server, &[DEEPSEEK_TEST_MODEL]).await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            sse_response(text_sse(DEEPSEEK_TEST_MODEL, "local phase proof"))
+                .set_delay(Duration::from_millis(850)),
+        )
+        .mount(&server)
+        .await;
+
+    let ws = make_sealed_workspace()?;
+    let mut tui = common_tui_builder(&ws)
+        .env("CODEWHALE_PROVIDER", "deepseek")
+        .env("DEEPSEEK_API_KEY", "deepseek-local-test-key")
+        .env("DEEPSEEK_BASE_URL", server.uri())
+        .env("DEEPSEEK_MODEL", DEEPSEEK_TEST_MODEL)
+        .spawn()?;
+    enter_launch_session(&mut tui)?;
+
+    type_and_submit(&mut tui, "show the underwater phase transition")?;
+    tui.wait_for(
+        |frame| {
+            frame
+                .row(frame.rows().saturating_sub(1))
+                .contains("working")
+        },
+        INTERACTION_TIMEOUT,
+    )?;
+    tui.wait_for(
+        |frame| {
+            frame
+                .row(frame.rows().saturating_sub(1))
+                .contains("finishing")
+        },
+        INTERACTION_TIMEOUT,
+    )?;
+    tui.wait_for(
+        |frame| {
+            let footer = frame.row(frame.rows().saturating_sub(1));
+            footer.contains("✓ done")
+        },
+        INTERACTION_TIMEOUT,
+    )?;
+
+    let _ = tui.shutdown();
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn underwater_theme_picker_emits_each_live_palette_to_the_terminal() -> Result<()> {
+    let _guard = RELEASE_RUNTIME_QA_LOCK.lock().await;
+    let ws = make_sealed_workspace()?;
+    let mut tui = common_tui_builder(&ws)
+        .env("CODEWHALE_PROVIDER", "deepseek")
+        .env("DEEPSEEK_MODEL", DEEPSEEK_TEST_MODEL)
+        .env("COLORTERM", "truecolor")
+        .spawn()?;
+    enter_launch_session(&mut tui)?;
+    type_and_submit(&mut tui, "/theme")?;
+    tui.wait_for_text("theme · live preview", INTERACTION_TIMEOUT)?;
+
+    let labels = [
+        "System",
+        "Terminal",
+        "Whale (Dark)",
+        "Whale Light",
+        "Grayscale",
+        "Catppuccin Mocha",
+        "Tokyo Night",
+        "Dracula",
+        "Gruvbox Dark",
+        "Claude",
+        "Matrix",
+        "Solarized Light",
+    ];
+    let mut previous_signature = None;
+    for (index, label) in labels.iter().enumerate() {
+        let selected = format!("▶ {}.", index + 1);
+        tui.wait_for(
+            |frame| frame.text().contains(&selected),
+            INTERACTION_TIMEOUT,
+        )?;
+        let frame = tui.frame();
+        let signature = (
+            frame.colors_at(0, 0).expect("theme surface cell"),
+            frame
+                .first_symbol_colors("▶")
+                .expect("selected theme pointer cell"),
+        );
+        assert!(
+            frame.text().contains(label),
+            "missing theme row {label}:\n{}",
+            frame.debug_dump()
+        );
+        if let Some(previous) = previous_signature {
+            assert_ne!(
+                signature,
+                previous,
+                "live ANSI palette did not change from {} to {label}",
+                labels[index - 1]
+            );
+        }
+        previous_signature = Some(signature);
+        if index + 1 < labels.len() {
+            tui.send(b"\x1b[B")?;
+        }
+    }
+
+    tui.send(b"\x1b")?;
+    let _ = tui.shutdown();
+    Ok(())
+}
+
 fn chat_requests(requests: &[Request]) -> Vec<Value> {
     requests
         .iter()

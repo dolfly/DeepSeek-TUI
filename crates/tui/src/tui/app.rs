@@ -1832,9 +1832,11 @@ pub struct App {
     pub low_motion: bool,
     pub constrained_frame_rate: bool,
     pub ocean_started_at: Instant,
-    /// Pending #61 (animated working strip). Set from config but not read
-    /// until the footer widget consumes it.
-    #[allow(dead_code)]
+    /// Start of the underwater shell's one-shot successful-turn exhale.
+    /// Kept separate from the ambient ocean clock so completion can settle
+    /// once without restarting or repainting the transcript field.
+    pub ocean_completion_started_at: Option<Instant>,
+    /// Enables the authored underwater phase and ambient motion system.
     pub fancy_animations: bool,
     /// `ombre` or `flat`; appearance is independent from motion settings.
     pub ocean_treatment: String,
@@ -2902,6 +2904,7 @@ impl App {
             low_motion,
             constrained_frame_rate,
             ocean_started_at: Instant::now(),
+            ocean_completion_started_at: None,
             fancy_animations,
             ocean_treatment,
             launch,

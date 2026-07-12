@@ -165,6 +165,10 @@ pub enum ShellPhase {
     Failed,
 }
 
+const WORKING_BUBBLE_FRAMES: [&str; 8] = ["⠀", "⢀", "⣀", "⣄", "⣤", "⣦", "⣶", "⣿"];
+const COMPLETION_BREATH_MS: u128 = 800;
+const COMPLETION_RELEASE_MS: u128 = 560;
+
 impl ShellPhase {
     #[must_use]
     pub fn from_app(app: &App) -> Self {
@@ -226,11 +230,50 @@ impl ShellPhase {
     #[must_use]
     pub fn color(self, app: &App) -> Color {
         match self {
-            Self::Idle | Self::Done => app.ui_theme.text_muted,
+            Self::Idle => app.ui_theme.text_muted,
+            Self::Done => app.ui_theme.success,
             Self::Typing => app.ui_theme.accent_primary,
             Self::Working => app.ui_theme.status_working,
             Self::Waiting | Self::Approval | Self::Failed => app.ui_theme.error_fg,
         }
+    }
+}
+
+fn completion_elapsed_ms(app: &App) -> Option<u128> {
+    if app.low_motion || !app.fancy_animations {
+        return None;
+    }
+    app.ocean_completion_started_at
+        .map(|started| started.elapsed().as_millis())
+        .filter(|elapsed| *elapsed < COMPLETION_BREATH_MS)
+}
+
+fn phase_marker(app: &App, phase: ShellPhase) -> (&'static str, &'static str) {
+    match phase {
+        ShellPhase::Idle => ("·", phase.label()),
+        ShellPhase::Typing => ("›", phase.label()),
+        ShellPhase::Working => {
+            let frame = if app.low_motion || !app.fancy_animations {
+                WORKING_BUBBLE_FRAMES[4]
+            } else {
+                let elapsed = app.turn_started_at.map_or_else(
+                    || app.ocean_started_at.elapsed(),
+                    |started| started.elapsed(),
+                );
+                let index = (elapsed.as_millis() / 300) as usize % WORKING_BUBBLE_FRAMES.len();
+                WORKING_BUBBLE_FRAMES[index]
+            };
+            (frame, phase.label())
+        }
+        ShellPhase::Waiting | ShellPhase::Approval => ("◆", phase.label()),
+        ShellPhase::Done => match completion_elapsed_ms(app) {
+            Some(elapsed) if elapsed < COMPLETION_RELEASE_MS => {
+                let index = ((elapsed / 140) as usize + 4).min(WORKING_BUBBLE_FRAMES.len() - 1);
+                (WORKING_BUBBLE_FRAMES[index], "finishing")
+            }
+            _ => ("✓", phase.label()),
+        },
+        ShellPhase::Failed => ("✕", phase.label()),
     }
 }
 
@@ -599,23 +642,26 @@ pub fn render_footer(area: Rect, buf: &mut Buffer, app: &App) {
         .style(Style::default().bg(app.ui_theme.footer_bg))
         .render(area, buf);
 
-    let mut left = vec![Span::styled(
-        phase.label(),
-        Style::default().fg(phase.color(app)).add_modifier(
-            if matches!(phase, ShellPhase::Waiting | ShellPhase::Approval) {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            },
-        ),
-    )];
+    let (marker, phase_label) = phase_marker(app, phase);
+    let phase_style = Style::default().fg(phase.color(app)).add_modifier(
+        if matches!(phase, ShellPhase::Waiting | ShellPhase::Approval) {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        },
+    );
+    let mut left = vec![
+        Span::styled(marker, phase_style),
+        Span::raw(" "),
+        Span::styled(phase_label, phase_style),
+    ];
     if tier != ShellTier::Compact
         && phase != ShellPhase::Done
         && let Some(status) = app
             .status_message
             .as_deref()
             .map(str::trim)
-            .filter(|status| !status.is_empty() && *status != phase.label())
+            .filter(|status| !status.is_empty() && *status != phase_label)
     {
         left.push(Span::styled(
             " · ",
@@ -721,7 +767,41 @@ pub fn empty_state_lines(app: &App, area: Rect) -> Vec<Line<'static>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::app::LaunchState;
+    use crate::{
+        config::Config,
+        tui::app::{LaunchState, TuiOptions},
+    };
+    use std::{
+        path::PathBuf,
+        time::{Duration, Instant},
+    };
+
+    fn test_app() -> App {
+        App::new(
+            TuiOptions {
+                model: "deepseek-v4-flash".to_string(),
+                workspace: PathBuf::from("."),
+                config_path: None,
+                config_profile: None,
+                allow_shell: false,
+                use_alt_screen: true,
+                use_mouse_capture: false,
+                use_bracketed_paste: true,
+                max_subagents: 1,
+                skills_dir: PathBuf::from("."),
+                memory_path: PathBuf::from("memory.md"),
+                notes_path: PathBuf::from("notes.txt"),
+                mcp_config_path: PathBuf::from("mcp.json"),
+                use_memory: false,
+                start_in_agent_mode: true,
+                skip_onboarding: true,
+                yolo: false,
+                resume_session_id: None,
+                initial_input: None,
+            },
+            &Config::default(),
+        )
+    }
 
     fn launch() -> LaunchState {
         LaunchState {
@@ -807,5 +887,57 @@ mod tests {
             state.status.as_deref(),
             Some("New worktree requires a Git repository.")
         );
+    }
+
+    #[test]
+    fn phase_markers_make_motion_and_attention_explicit() {
+        let mut app = test_app();
+
+        app.runtime_turn_status = Some("in_progress".to_string());
+        app.turn_started_at = Some(Instant::now() - Duration::from_millis(1_250));
+        let (working, label) = phase_marker(&app, ShellPhase::from_app(&app));
+        assert_eq!(working, WORKING_BUBBLE_FRAMES[4]);
+        assert_eq!(label, "working");
+
+        app.low_motion = true;
+        app.turn_started_at = Some(Instant::now() - Duration::from_secs(9));
+        assert_eq!(
+            phase_marker(&app, ShellPhase::Working).0,
+            WORKING_BUBBLE_FRAMES[4]
+        );
+
+        app.runtime_turn_status = None;
+        app.plan_prompt_pending = true;
+        assert_eq!(
+            phase_marker(&app, ShellPhase::from_app(&app)),
+            ("◆", "waiting on you")
+        );
+
+        app.plan_prompt_pending = false;
+        app.runtime_turn_status = Some("failed".to_string());
+        assert_eq!(
+            phase_marker(&app, ShellPhase::from_app(&app)),
+            ("✕", "failed")
+        );
+    }
+
+    #[test]
+    fn completion_releases_once_then_settles_to_checkmark() {
+        let mut app = test_app();
+        app.runtime_turn_status = Some("completed".to_string());
+        app.low_motion = false;
+        app.fancy_animations = true;
+        app.ocean_completion_started_at = Some(Instant::now() - Duration::from_millis(120));
+
+        let (marker, label) = phase_marker(&app, ShellPhase::from_app(&app));
+        assert_ne!(marker, "✓");
+        assert_eq!(label, "finishing");
+
+        app.ocean_completion_started_at = Some(Instant::now() - Duration::from_millis(700));
+        assert_eq!(phase_marker(&app, ShellPhase::Done), ("✓", "done"));
+
+        app.low_motion = true;
+        app.ocean_completion_started_at = Some(Instant::now());
+        assert_eq!(phase_marker(&app, ShellPhase::Done), ("✓", "done"));
     }
 }

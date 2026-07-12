@@ -65,9 +65,9 @@ impl OceanRamp {
         } else {
             f32::from(row.min(height - 1)) / f32::from(height - 1)
         };
-        let cycle = (elapsed_ms % 18_000) as f32 / 18_000.0;
+        let cycle = (elapsed_ms % 12_000) as f32 / 12_000.0;
         let breath = (cycle * std::f32::consts::TAU).sin() * 0.5 + 0.5;
-        mix_colors(base, self.ambient, breath * 0.045 * (1.0 - depth))
+        mix_colors(base, self.ambient, breath * 0.075 * (1.0 - depth))
     }
 }
 
@@ -142,16 +142,36 @@ mod tests {
     }
 
     #[test]
+    fn every_shipped_theme_has_an_intentional_ocean_treatment() {
+        use crate::palette::{SELECTABLE_THEMES, ThemeId};
+
+        for id in SELECTABLE_THEMES {
+            let ramp = OceanRamp::for_theme(&id.ui_theme());
+            if matches!(id, ThemeId::Terminal) {
+                assert_eq!(ramp, None, "Terminal must keep its inherited background");
+            } else {
+                let ramp = ramp.unwrap_or_else(|| panic!("{} has no ocean ramp", id.name()));
+                assert_ne!(
+                    ramp.surface,
+                    ramp.deep,
+                    "{} lost underwater depth",
+                    id.name()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn shimmer_is_subtle_and_concentrated_near_the_surface() {
         let ramp = OceanRamp::for_theme(&crate::palette::UI_THEME).expect("RGB theme");
         let surface_a = ramp.color_at_phase(0, 20, 0);
-        let surface_b = ramp.color_at_phase(0, 20, 4_500);
+        let surface_b = ramp.color_at_phase(0, 20, 3_000);
         let deep_a = ramp.color_at_phase(19, 20, 0);
-        let deep_b = ramp.color_at_phase(19, 20, 4_500);
+        let deep_b = ramp.color_at_phase(19, 20, 3_000);
 
         let surface_shift = distance(surface_a, surface_b);
         assert!(
-            (1..=12).contains(&surface_shift),
+            (2..=18).contains(&surface_shift),
             "surface shift was {surface_shift}"
         );
         assert_eq!(

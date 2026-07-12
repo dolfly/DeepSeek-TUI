@@ -666,36 +666,54 @@ fn render_ambient_life(
         return;
     }
 
+    let span_a = (area.width / 6).clamp(10, 24);
+    let span_b = (area.width / 7).clamp(8, 20);
+    let span_c = (area.width / 8).clamp(7, 18);
     let (drift_a, fish_a_forward) = if animated {
-        ambient_ping_pong(elapsed_ms, 620, 11, 0)
+        ambient_ping_pong(elapsed_ms, 480, span_a, 0)
     } else {
         (0, true)
     };
     let (drift_b, fish_b_forward) = if animated {
-        ambient_ping_pong(elapsed_ms, 760, 8, 1_900)
+        ambient_ping_pong(elapsed_ms, 560, span_b, 1_900)
     } else {
         (0, false)
     };
+    let (drift_c, fish_c_forward) = if animated {
+        ambient_ping_pong(elapsed_ms, 640, span_c, 3_700)
+    } else {
+        (0, true)
+    };
     let rise = if animated {
-        u16::try_from((elapsed_ms / 1_100) % 4).unwrap_or(0)
+        u16::try_from((elapsed_ms / 720) % 5).unwrap_or(0)
     } else {
         0
     };
+    let bubble = if animated {
+        ["·", "˚", "°", "˚"][(elapsed_ms / 300) as usize % 4]
+    } else {
+        "°"
+    };
     let marks = [
         (
-            area.width / 9 + drift_a,
-            area.height * 7 / 10,
+            area.width / 12 + drift_a,
+            area.height * 3 / 4,
             if fish_a_forward { "><>" } else { "<><" },
         ),
         (
-            (area.width * 4 / 5).saturating_sub(drift_b),
-            area.height * 2 / 5,
+            (area.width * 5 / 6).saturating_sub(drift_b),
+            area.height * 3 / 8,
             if fish_b_forward { "><>" } else { "<><" },
+        ),
+        (
+            area.width / 3 + drift_c,
+            area.height / 6,
+            if fish_c_forward { "><>" } else { "<><" },
         ),
         (
             area.width * 3 / 4,
             (area.height / 4).saturating_sub(rise),
-            "°",
+            bubble,
         ),
     ];
     for (local_x, local_y, mark) in marks {
@@ -5242,7 +5260,12 @@ mod tests {
         ChatWidget::new(&mut app, area).render(area, &mut buf);
 
         assert_ne!(buf[(0, 0)].bg, buf[(0, 19)].bg);
-        assert!(buffer_text(&buf, area).contains("><>"));
+        let rendered = buffer_text(&buf, area);
+        let fish_count = rendered.matches("><>").count() + rendered.matches("<><").count();
+        assert_eq!(
+            fish_count, 3,
+            "wide idle water should contain three fish:\n{rendered}"
+        );
 
         let context = "codewhale · /tmp/codewhale-test-workspace · no git · mcp 0";
         let context_x = ((100usize - UnicodeWidthStr::width(context)) / 2) as u16;

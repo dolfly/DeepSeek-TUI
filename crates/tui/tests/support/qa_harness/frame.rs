@@ -62,6 +62,31 @@ impl Frame {
         self.text().contains(needle)
     }
 
+    /// Foreground/background colors for one terminal cell. Theme QA uses the
+    /// parsed ANSI result rather than trusting a screenshot renderer's own
+    /// palette or accessibility environment.
+    pub fn colors_at(&self, row: u16, col: u16) -> Option<(vt100::Color, vt100::Color)> {
+        self.parser
+            .screen()
+            .cell(row, col)
+            .map(|cell| (cell.fgcolor(), cell.bgcolor()))
+    }
+
+    /// Colors on the first cell whose terminal contents equal `symbol`.
+    pub fn first_symbol_colors(&self, symbol: &str) -> Option<(vt100::Color, vt100::Color)> {
+        for row in 0..self.rows() {
+            for col in 0..self.cols() {
+                let Some(cell) = self.parser.screen().cell(row, col) else {
+                    continue;
+                };
+                if cell.contents() == symbol {
+                    return Some((cell.fgcolor(), cell.bgcolor()));
+                }
+            }
+        }
+        None
+    }
+
     /// Whether any row of the screen has non-blank content. Used to detect a
     /// fully detached / blank viewport.
     pub fn any_visible_text(&self) -> bool {
