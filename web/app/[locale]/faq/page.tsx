@@ -24,7 +24,7 @@ const faqEn: FaqItem[] = [
     q: "What is Codewhale?",
     a: (
       <>
-        Codewhale is a terminal-native coding agent for open-source and open-weight models. It runs from the <code className="inline">codewhale</code> command, streams reasoning blocks, edits local workspaces with approval gates, and can auto-route each turn to the right model and thinking level. DeepSeek V4 is the first-class model path; OpenRouter, Hugging Face, self-hosted runtimes, and other OpenAI-compatible routes are additive.
+        Codewhale is a terminal-native coding agent that works across hosted and local models. It runs from the <code className="inline">codewhale</code> command, streams reasoning blocks, edits local workspaces with approval gates, and can route each turn to a configured model and thinking level. DeepSeek is the bundled default route, while OpenRouter, Anthropic, OpenAI-compatible services, and self-hosted runtimes use the same runtime and tools.
       </>
     ),
     sources: ["README.md", "docs/ARCHITECTURE.md"],
@@ -113,7 +113,7 @@ codewhale doctor         # full connectivity check`}
       <>
         <p className="mb-2">Codewhale ships with these built-in providers:</p>
         <ul className="list-disc pl-5 space-y-1 text-sm text-ink-soft mb-3">
-          <li><strong>DeepSeek</strong> — first-class, native API. Reasoning streaming, cache metrics, thinking effort control.</li>
+          <li><strong>DeepSeek</strong> — bundled default with a native API route, reasoning streaming, cache metrics, and thinking effort control.</li>
           <li><strong>OpenRouter</strong> — unified API for DeepSeek models and other open-model routes.</li>
           <li><strong>OpenAI-compatible</strong>, <strong>NVIDIA NIM</strong>, <strong>AtlasCloud</strong>, <strong>Wanjie Ark</strong>, <strong>Volcengine Ark</strong>, <strong>Xiaomi MiMo</strong>, <strong>Novita</strong>, <strong>Fireworks</strong>, <strong>SiliconFlow</strong>, <strong>SiliconFlow CN</strong>, <strong>Arcee AI</strong>, <strong>Moonshot/Kimi</strong>, <strong>Hugging Face</strong>, <strong>DeepInfra</strong>, <strong>Together AI</strong>, <strong>Z.ai</strong>, <strong>StepFun</strong>, <strong>MiniMax</strong>, <strong>OpenAI Codex</strong>, <strong>Anthropic</strong>, <strong>SGLang</strong>, <strong>vLLM</strong>, <strong>Ollama</strong></li>
         </ul>
@@ -369,7 +369,7 @@ const faqZh: FaqItem[] = [
     q: "Codewhale 是什么？",
     a: (
       <>
-        Codewhale 是一个面向开源模型的终端原生编程智能体。通过 <code className="inline">codewhale</code> 命令启动，流式输出推理块，在有审批门槛的情况下编辑本地工作区，并可为每个回合自动选择最合适的模型和推理深度。DeepSeek V4 是一级模型路径；OpenRouter、Hugging Face、自托管运行时和其他 OpenAI 兼容路由都是增量选择。
+        Codewhale 是一个可使用托管与本地模型的终端原生编程智能体。通过 <code className="inline">codewhale</code> 命令启动，流式输出推理块，在有审批门槛的情况下编辑本地工作区，并可为每个回合选择已配置的模型和推理深度。DeepSeek 是内置默认路由；OpenRouter、Anthropic、OpenAI 兼容服务与自托管运行时使用同一套运行时和工具。
       </>
     ),
     sources: ["README.md", "docs/ARCHITECTURE.md"],
@@ -457,7 +457,7 @@ codewhale doctor         # 完整连接检查`}
       <>
         <p className="mb-2">Codewhale 内建以下提供商：</p>
         <ul className="list-disc pl-5 space-y-1 text-sm text-ink-soft mb-3">
-          <li><strong>DeepSeek</strong> — 一级支持，原生 API。推理流、缓存指标、思考力度控制。</li>
+          <li><strong>DeepSeek</strong> — 内置默认原生 API 路由，支持推理流、缓存指标和思考力度控制。</li>
           <li><strong>OpenRouter</strong> — 统一 API，可访问 DeepSeek 和其他开放模型路由。</li>
           <li><strong>OpenAI 兼容</strong>、<strong>NVIDIA NIM</strong>、<strong>AtlasCloud</strong>、<strong>Wanjie Ark</strong>、<strong>Volcengine Ark</strong>、<strong>Xiaomi MiMo</strong>、<strong>Novita</strong>、<strong>Fireworks</strong>、<strong>SiliconFlow</strong>、<strong>SiliconFlow CN</strong>、<strong>Arcee AI</strong>、<strong>Moonshot/Kimi</strong>、<strong>Hugging Face</strong>、<strong>DeepInfra</strong>、<strong>Together AI</strong>、<strong>Z.ai</strong>、<strong>StepFun</strong>、<strong>MiniMax</strong>、<strong>OpenAI Codex</strong>、<strong>Anthropic</strong>、<strong>SGLang</strong>、<strong>vLLM</strong>、<strong>Ollama</strong></li>
         </ul>

@@ -11,21 +11,16 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
     locale,
     title: isZh ? "模型与提供商 · Codewhale" : "Models & providers · Codewhale",
     description: isZh
-      ? "自带密钥，没有推理加价，不会悄悄换模型。DeepSeek 一级支持，本地 vLLM / SGLang / Ollama 无需密钥，所有提供商共用同一个运行时和同一套工具。"
-      : "Bring your own key, no inference markup, no silent model switching. DeepSeek is first-class, local vLLM / SGLang / Ollama need no key, and every provider routes through the same runtime and tools.",
+      ? "自带密钥，不会悄悄换模型。本地 vLLM、SGLang 与 Ollama 无需密钥，所有提供商共用同一个运行时、工具和安全边界。"
+      : "Bring your own key with no silent model switching. Local vLLM, SGLang, and Ollama need no key, and every provider uses the same runtime, tools, and safety boundaries.",
   });
 }
-
-/** Provider ids covered by the featured cards; everything else renders as a peer card. */
-const FEATURED_IDS = new Set(["deepseek", "deepseek-anthropic", "vllm", "sglang", "ollama", "openrouter"]);
 
 export default async function ModelsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const isZh = locale === "zh";
   const p = (path: string) => (isZh ? `/zh${path}` : `/en${path}`);
   const facts = await getFacts();
-
-  const peers = facts.providers.filter((prov) => !FEATURED_IDS.has(prov.id));
 
   return (
     <>
@@ -68,25 +63,25 @@ export default async function ModelsPage({ params }: { params: Promise<{ locale:
         </div>
       </section>
 
-      {/* FEATURED ROUTES */}
+      {/* COMMON SETUP PATTERNS */}
       <section className="mx-auto max-w-[1100px] px-6 py-10 hairline-t">
         <div className="flex items-baseline gap-4 mb-6">
-          <Seal char="先" />
-          <div className="eyebrow">{isZh ? "先说这几条路" : "Start with these routes"}</div>
+          <Seal char="路" />
+          <div className="eyebrow">{isZh ? "常见配置方式" : "Common setup patterns"}</div>
         </div>
 
         <div className="grid md:grid-cols-3 gap-0 col-rule hairline-t hairline-b">
-          {/* DeepSeek — first-class and the default */}
+          {/* Bundled default route */}
           <div className="p-6">
             <div className="flex items-baseline gap-2 mb-2">
               <h2 className="font-display text-xl">DeepSeek</h2>
-              <span className="pill pill-hot text-[0.58rem]">{isZh ? "一级支持 · 默认" : "first-class · default"}</span>
+              <span className="pill pill-hot text-[0.58rem]">{isZh ? "默认路由" : "default route"}</span>
             </div>
             <div className="font-mono text-[0.68rem] text-ink-mute mb-3 break-all">DEEPSEEK_API_KEY</div>
             <p className={`text-sm text-ink-soft ${isZh ? "leading-[1.9] tracking-wide" : "leading-relaxed"}`}>
               {isZh
-                ? `默认提供商，默认模型 ${facts.defaultModel ?? "deepseek-v4-pro"}。DeepSeek API（api.deepseek.com）中国大陆直连，无需代理。另有 deepseek-anthropic——DeepSeek 可选的 Messages-API 路由。`
-                : `The default provider, with ${facts.defaultModel ?? "deepseek-v4-pro"} as the default model. The DeepSeek API (api.deepseek.com) is reachable from mainland China without a proxy. There's also deepseek-anthropic, DeepSeek's opt-in Messages-API route.`}
+                ? `新配置默认使用 ${facts.defaultModel ?? "deepseek-v4-pro"}。你可以保留该路由、切换到其他内置提供商，或使用 deepseek-anthropic Messages-API 路由；运行时规则保持一致。`
+                : `New configurations default to ${facts.defaultModel ?? "deepseek-v4-pro"}. Keep that route, switch to another built-in provider, or use the deepseek-anthropic Messages-API route; the runtime rules stay the same.`}
             </p>
           </div>
 
@@ -120,11 +115,11 @@ export default async function ModelsPage({ params }: { params: Promise<{ locale:
         </div>
       </section>
 
-      {/* THE REST OF THE REGISTRY */}
+      {/* FULL REGISTRY */}
       <section className="mx-auto max-w-[1100px] px-6 py-10 hairline-t">
         <div className="flex items-baseline gap-4 mb-3">
           <Seal char="众" />
-          <div className="eyebrow">{isZh ? "其余提供商，一视同仁" : "The rest, as peers"}</div>
+          <div className="eyebrow">{isZh ? "完整提供商注册表" : "Full provider registry"}</div>
         </div>
         <p className={`mb-6 max-w-2xl text-sm text-ink-soft ${isZh ? "leading-[1.9] tracking-wide" : "leading-relaxed"}`}>
           {isZh
@@ -133,7 +128,7 @@ export default async function ModelsPage({ params }: { params: Promise<{ locale:
         </p>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-0 hairline-t hairline-l">
-          {peers.map((prov) => (
+          {facts.providers.map((prov) => (
             <div key={prov.id} className="p-4 hairline-b hairline-r">
               <div className="font-display text-base mb-1">{prov.label}</div>
               <div className="font-mono text-[0.66rem] text-indigo mb-1">{prov.id}</div>

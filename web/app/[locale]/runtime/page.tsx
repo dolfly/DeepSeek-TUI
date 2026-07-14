@@ -10,8 +10,8 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
     locale,
     title: isZh ? "Runtime & 集成 · Codewhale" : "Runtime & Integrations · Codewhale",
     description: isZh
-      ? "Codewhale 的本地 Runtime API、HTTP/SSE、ACP 协议、MCP 服务器、VS Code 扩展、Telegram / Feishu 桥接以及实验性微信集成。"
-      : "Codewhale local Runtime API, HTTP/SSE, ACP protocol, MCP servers, VS Code extension, Telegram and Feishu bridges, and experimental Weixin integration.",
+      ? "Codewhale 的本地 Runtime API、HTTP/SSE、ACP stdio 适配器、MCP 服务器、VS Code 配套扩展与消息桥接。"
+      : "Codewhale's local Runtime API, HTTP/SSE, baseline ACP stdio adapter, MCP servers, Phase 0 VS Code companion, and messaging bridges.",
   });
 }
 
@@ -31,21 +31,21 @@ const INTEGRATIONS: Integration[] = [
     docsHref: "/en/docs#runtime-api",
   },
   {
-    name: "ACP (Agent Communication Protocol)",
-    desc: "Open IETF-standard protocol surface for agent-to-agent communication. Codewhale speaks ACP natively so external agents, tools, and platforms can discover and interact with running sessions.",
-    descZh: "开放的 IETF 标准 Agent 通信协议。Codewhale 原生支持 ACP，外部 Agent、工具和平台可以发现并互操作运行中的会话。",
+    name: "ACP (Agent Client Protocol)",
+    desc: "Baseline JSON-RPC adapter over stdio for compatible editor clients such as Zed. It supports initialize, new session, prompt, and cancel with text responses; shell and file tools, checkpoint replay, and session loading remain on the full Runtime API.",
+    descZh: "面向 Zed 等兼容编辑器客户端的基础 JSON-RPC stdio 适配器。它支持初始化、新建会话、提示和取消，并返回文本响应；shell 与文件工具、检查点回放和会话加载仍由完整 Runtime API 提供。",
     docsHref: "/en/docs#acp",
   },
   {
     name: "MCP (Model Context Protocol)",
-    desc: "Connect Codewhale to external tools and services via MCP servers over stdio or HTTP/SSE. Pre-configured servers include filesystem, Git, SQLite, and popular SaaS platforms.",
-    descZh: "通过 MCP 服务器（stdio 或 HTTP/SSE）将 Codewhale 连接到外部工具和服务。预配置的服务器包括文件系统、Git、SQLite 和常用 SaaS 平台。",
+    desc: "Connect Codewhale to external tools and services through configured MCP servers over stdio or HTTP/SSE, or expose Codewhale's own tools to another MCP client.",
+    descZh: "通过已配置的 MCP 服务器（stdio 或 HTTP/SSE）将 Codewhale 连接到外部工具和服务，或把 Codewhale 自身工具暴露给其他 MCP 客户端。",
     docsHref: "/en/docs#mcp",
   },
   {
     name: "VS Code Extension",
-    desc: "Open-source VS Code extension that embeds Codewhale as a side-panel agent. Run codewhale inside your editor with full workspace context.",
-    descZh: "开源 VS Code 扩展，将 Codewhale 嵌入编辑器的侧边面板。在编辑器内利用完整工作区上下文运行 Codewhale。",
+    desc: "Phase 0 companion for the local runtime. It can open Codewhale in a terminal, start and check the Runtime API, and show read-only thread summaries and restore points. It does not yet provide full chat, inline edits, or editor actions.",
+    descZh: "本地 Runtime 的 Phase 0 配套扩展。它可以在终端中打开 Codewhale、启动并检查 Runtime API，以及显示只读线程摘要和还原点；目前尚不提供完整聊天、内联编辑或编辑器操作。",
     href: "https://github.com/Hmbown/CodeWhale/tree/main/extensions/vscode",
   },
   {
@@ -106,8 +106,8 @@ export default async function RuntimePage({ params }: { params: Promise<{ locale
             <strong className="text-ink">{isZh ? "本地优先" : "Local-first"}</strong>
             <p className="mt-1">
               {isZh
-                ? "Runtime API 默认仅监听 127.0.0.1，无托管中继，无云依赖。你的数据、你的模型、你的控制权。"
-                : "The Runtime API binds 127.0.0.1 by default. No hosted relay. No cloud dependency. Your data, your model, your control."}
+                ? "Runtime API 默认仅监听 127.0.0.1。本地运行时不需要 Codewhale 账户或托管中继；可选托管应用使用独立登录。"
+                : "The Runtime API binds 127.0.0.1 by default. The local runtime does not require a Codewhale account or hosted relay; the optional managed app uses a separate sign-in."}
             </p>
           </div>
           <div>
@@ -122,16 +122,16 @@ export default async function RuntimePage({ params }: { params: Promise<{ locale
             <strong className="text-ink">{isZh ? "权限用户控制" : "Permissions user-controlled"}</strong>
             <p className="mt-1">
               {isZh
-                ? "工具审批、shell 授权、沙箱策略和网络访问均由用户控制，不可从远程绕过。"
-                : "Tool approvals, shell authorization, sandbox policies, and network access are all user-controlled and cannot be bypassed remotely."}
+                ? "远程客户端通过经过认证的 Runtime API 提交请求与审批决定。本地模式、权限姿态和沙箱策略仍然生效。"
+                : "Remote clients submit requests and approval decisions through the authenticated Runtime API. Local mode, permission posture, and sandbox policy still apply."}
             </p>
           </div>
           <div>
             <strong className="text-ink">{isZh ? "开放协议" : "Open protocols"}</strong>
             <p className="mt-1">
               {isZh
-                ? "Codewhale 使用标准 HTTP/SSE、JSON-RPC 和 ACP，可与任何兼容客户端或平台集成。"
-                : "Codewhale speaks standard HTTP/SSE, JSON-RPC, and ACP — compatible with any client or platform."}
+                ? "HTTP/SSE Runtime API、MCP 和基础 ACP stdio 适配器分别服务于不同集成场景；请根据客户端需要选择对应接口。"
+                : "The HTTP/SSE Runtime API, MCP surface, and baseline ACP stdio adapter serve different integration needs; choose the interface your compatible client supports."}
             </p>
           </div>
         </div>
@@ -153,7 +153,10 @@ export default async function RuntimePage({ params }: { params: Promise<{ locale
                     {item.name} ↗
                   </a>
                 ) : (
-                  <Link href={item.docsHref ?? "/en/docs"} className="body-link">
+                  <Link
+                    href={(item.docsHref ?? "/en/docs").replace(/^\/en/, isZh ? "/zh" : "/en")}
+                    className="body-link"
+                  >
                     {item.name}
                   </Link>
                 )}
@@ -174,14 +177,14 @@ export default async function RuntimePage({ params }: { params: Promise<{ locale
               详细实现文档：{" "}
               <Link href="/zh/docs" className="body-link">docs/RUNTIME_API.md</Link>
               {" · "}
-              <Link href="/zh/docs#acp" className="body-link">ACP Registry</Link>
+              <Link href="/zh/docs#acp" className="body-link">ACP stdio 适配器</Link>
             </>
           ) : (
             <>
               Detailed implementation docs:{" "}
               <Link href="/en/docs" className="body-link">docs/RUNTIME_API.md</Link>
               {" · "}
-              <Link href="/en/docs#acp" className="body-link">ACP Registry</Link>
+              <Link href="/en/docs#acp" className="body-link">ACP stdio adapter</Link>
             </>
           )}
         </p>
