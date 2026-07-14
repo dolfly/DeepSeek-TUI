@@ -750,7 +750,7 @@ impl GuidedConstitutionDraft {
                     bounded_freeform_note(note, MAX_NOTES_LEN)
                 ),
                 Locale::ZhHans => format!(
-                    "\n用户自由原则：{}",
+                    "\n用户自定义准则：{}",
                     bounded_freeform_note(note, MAX_NOTES_LEN)
                 ),
                 Locale::ZhHant => format!(
@@ -1322,13 +1322,13 @@ impl GuidedPrinciples {
                 "自由原則：影響の大きい操作の前に、可逆手順、チェックポイント、ロールバック説明を選ぶ。"
             }
             (Locale::ZhHans, Self::ScopedChanges) => {
-                "自由原则：优先采用小范围、可审查的改动；除非明确要求，不做无关重构。"
+                "自定义准则：优先采用小范围、可审查的改动；除非明确要求，不做无关重构。"
             }
             (Locale::ZhHans, Self::UserVoice) => {
-                "自由原则：保留用户的语气、品牌和约束；不把偏好推断成权限扩大。"
+                "自定义准则：保留用户的语气、品牌和约束；不把偏好推断成权限扩大。"
             }
             (Locale::ZhHans, Self::ReversibleOps) => {
-                "自由原则：先选择可逆步骤、检查点和回滚说明，再进行高影响操作。"
+                "自定义准则：先选择可逆步骤、检查点和回滚说明，再进行高影响操作。"
             }
             (Locale::ZhHant, Self::ScopedChanges) => {
                 "自由原則：優先採用小範圍、可審查的改動；除非明確要求，不做無關重構。"
@@ -1568,11 +1568,13 @@ fn freeform_note_line(locale: Locale, note: &str, editing: bool) -> Line<'static
         (Locale::Ja, false, true) => "F 自由原則：F で有界の原則を入力または貼り付け".to_string(),
         (Locale::Ja, false, false) => format!("F 自由原則：{preview}"),
         (Locale::ZhHans, true, true) => {
-            "F 自由原则：正在编辑 - 输入或粘贴有界原则，Enter 完成".to_string()
+            "F 自定义准则：正在编辑 - 输入或粘贴明确的准则，Enter 完成".to_string()
         }
-        (Locale::ZhHans, true, false) => format!("F 自由原则：正在编辑 - {preview}"),
-        (Locale::ZhHans, false, true) => "F 自由原则：按 F 输入或粘贴自己的有界原则".to_string(),
-        (Locale::ZhHans, false, false) => format!("F 自由原则：{preview}"),
+        (Locale::ZhHans, true, false) => format!("F 自定义准则：正在编辑 - {preview}"),
+        (Locale::ZhHans, false, true) => {
+            "F 自定义准则：按 F 输入或粘贴自己的明确准则".to_string()
+        }
+        (Locale::ZhHans, false, false) => format!("F 自定义准则：{preview}"),
         (Locale::ZhHant, true, true) => {
             "F 自由原則：正在編輯 - 輸入或貼上有界原則，Enter 完成".to_string()
         }
@@ -3260,7 +3262,7 @@ enum DraftProvenance {
 fn ratification_preview_title(locale: Locale) -> &'static str {
     match locale {
         Locale::Ja => "ユーザー憲法 - 批准前の草案",
-        Locale::ZhHans => "用户宪法 — 批准前草案",
+        Locale::ZhHans => "用户协作准则 — 确认前草案",
         Locale::ZhHant => "使用者憲法 - 批准前草案",
         Locale::PtBr => "Constituição do Usuário - Rascunho para Ratificação",
         Locale::Es419 => "Constitución del Usuario - Borrador para Ratificación",
@@ -3285,7 +3287,7 @@ fn constitution_ratification_text(
         .render_block(None)
         .unwrap_or_else(|| match locale {
             Locale::Ja => "構造化された憲法は空です。".to_string(),
-            Locale::ZhHans => "结构化宪法为空。".to_string(),
+            Locale::ZhHans => "结构化协作准则为空。".to_string(),
             Locale::ZhHant => "結構化憲法為空。".to_string(),
             Locale::PtBr => "A constituição estruturada está vazia.".to_string(),
             Locale::Es419 => "La constitución estructurada está vacía.".to_string(),
@@ -3343,30 +3345,31 @@ fn constitution_ratification_text(
                 ),
                 DraftProvenance::Guided => "由你的引导式答案确定性生成。".to_string(),
                 DraftProvenance::Existing => {
-                    "你现有的宪法，读取自 constitution.json——原样展示，未做任何修改。".to_string()
+                    "你现有的协作准则，读取自 constitution.json——原样展示，未做任何修改。"
+                        .to_string()
                 }
             };
             let ratify_how = match provenance {
                 DraftProvenance::Existing => {
-                    "这已是你现行的准则。关闭此预览后按 K 保留并完成检查点——文件不会被修改。\
-                     之后可随时用 /constitution 或 /setup 修订。"
+                    "这已是你当前使用的协作准则。关闭此预览后按 K 保留并完成检查点——文件不会被修改。\
+                     之后可随时用 /constitution 或 /setup 修改。"
                 }
                 _ => {
-                    "未经你确认，任何内容都不会成为准则。关闭此预览后按 G 批准并保存；\
-                     之后可随时用 /constitution 或 /setup 修订。"
+                    "未经你确认，任何内容都不会成为协作准则。关闭此预览后按 G 确认并保存；\
+                     之后可随时用 /constitution 或 /setup 修改。"
                 }
             };
             format!(
-                "CODEWHALE · 用户宪法\n{RULE}\n\n{drafted_by}\n\n\
-                 这是 CodeWhale 与你协作的长期准则。像优秀的宪法一样：足够简短因而可用，由持久原则而非详尽规则构成，并且可以随你修订。\
-                 它界定权力与边界，而非裁决每个具体决定；它让协作跨会话延续——但它不是记忆，它承载的是原则，而非历史。\n\n\
+                "CODEWHALE · 用户协作准则\n{RULE}\n\n{drafted_by}\n\n\
+                 这是 CodeWhale 与你协作时长期遵循的偏好和规则。内容应保持简短、便于执行，以持久原则为主，并可随时调整。\
+                 它界定协作方式与行为边界，而不是替你决定每一种情况；它让协作跨会话延续——但它不是记忆，只保留原则，不保留历史。\n\n\
                  {rendered}\n\n\
                  权限层级\n{layer_order}\n你的直接指令始终高于本文件。\n\n\
                  它不能做什么\n\
                  它只提供行为指导，不能授予或更改审批策略、沙箱、Shell、网络、信任、MCP 权限、默认模式、发布或支出权限——这些始终由你在运行时掌控。\n\n\
-                 精简核心与可选模块\n\
-                 内置核心始终生效。本草案只保存你的用户全局长期偏好。执行/编排等重型教义位于模式提示词或未来的可选模块中；此预览不会启用模块或更改其配置。\n\n\
-                 批准\n{ratify_how}"
+                 精简核心与可选策略\n\
+                 内置核心始终生效。本草案只保存你的用户全局长期偏好。执行与编排等高级策略仍由模式提示词或未来的可选规则包管理；此预览不会启用任何策略或更改配置。\n\n\
+                 确认\n{ratify_how}"
             )
         }
         Locale::ZhHant => {
@@ -3618,7 +3621,7 @@ fn model_draft_invitation_line(locale: Locale, model_label: &str) -> String {
             format!("A {model_label} が起草し、あなたが批准します。確認するまで保存しません。")
         }
         Locale::ZhHans => {
-            format!("A {model_label} 起草，你批准。未经确认不会保存。")
+            format!("A {model_label} 生成草案，由你确认。未经确认不会保存。")
         }
         Locale::ZhHant => {
             format!("A {model_label} 起草，你批准。未經確認不會保存。")
@@ -3645,7 +3648,7 @@ fn model_draft_invitation_line(locale: Locale, model_label: &str) -> String {
 fn keep_existing_invitation_line(locale: Locale) -> &'static str {
     match locale {
         Locale::Ja => "K 既存の憲法を保持 - 確認して保持、ファイルは変更しません。",
-        Locale::ZhHans => "K 保留现有宪法——先查看，再保留，文件不变。",
+        Locale::ZhHans => "K 保留现有协作准则——先查看，再保留，文件不变。",
         Locale::ZhHant => "K 保留現有憲法 - 先查看，再保留，檔案不變。",
         Locale::PtBr => "K Manter constituição existente - revise, mantenha, arquivo inalterado.",
         Locale::Es419 => {
@@ -3666,7 +3669,7 @@ fn model_draft_ready_line(locale: Locale, model_label: &str) -> String {
             )
         }
         Locale::ZhHans => {
-            format!("{model_label} 的草案待批准——按 G 查看并批准；按 1-6 会丢弃草案。")
+            format!("{model_label} 的草案待确认——按 G 查看并确认；按 1-6 会丢弃草案。")
         }
         Locale::ZhHant => {
             format!("{model_label} 的草案待批准 - 按 G 查看並批准；按 1-6 會丟棄草案。")
@@ -3703,7 +3706,9 @@ pub(crate) fn model_draft_ready_message(locale: Locale, model_label: &str) -> St
         Locale::Ja => format!(
             "{model_label} があなたの憲法を起草しました。プレビューを確認してから G で批准してください。"
         ),
-        Locale::ZhHans => format!("{model_label} 已起草你的宪法。请查看预览，然后按 G 批准。"),
+        Locale::ZhHans => {
+            format!("{model_label} 已生成你的协作准则草案。请查看预览，然后按 G 确认。")
+        }
         Locale::ZhHant => format!("{model_label} 已起草你的憲法。請查看預覽，然後按 G 批准。"),
         Locale::PtBr => format!(
             "{model_label} rascunhou sua constituição. Revise a prévia e pressione G para ratificar."
@@ -3737,7 +3742,7 @@ pub(crate) fn model_draft_failed_message(
             )
         }
         Locale::ZhHans => {
-            format!("{model_label} 未能完成起草（{reason}）。引导式草案仍然有效——按 G 预览并批准。")
+            format!("{model_label} 未能生成草案（{reason}）。引导式草案仍可使用——按 G 预览并确认。")
         }
         Locale::ZhHant => {
             format!("{model_label} 未能完成起草（{reason}）。引導式草案仍然有效；按 G 預覽並批准。")
@@ -4133,6 +4138,39 @@ mod tests {
     }
 
     #[test]
+    fn zh_hans_constitution_surfaces_use_functional_terminology() {
+        let constitution = GuidedConstitutionDraft::default().to_constitution(Locale::ZhHans);
+        let samples = [
+            ratification_preview_title(Locale::ZhHans).to_string(),
+            constitution_ratification_text(
+                Locale::ZhHans,
+                &constitution,
+                &DraftProvenance::Existing,
+            ),
+            lines_to_text(vec![freeform_note_line(Locale::ZhHans, "", false)]),
+            keep_existing_invitation_line(Locale::ZhHans).to_string(),
+            model_draft_invitation_line(Locale::ZhHans, "GLM-5.2"),
+            model_draft_ready_line(Locale::ZhHans, "GLM-5.2"),
+            model_draft_ready_message(Locale::ZhHans, "GLM-5.2"),
+            model_draft_failed_message(Locale::ZhHans, "GLM-5.2", "超时"),
+        ];
+        let visible_copy = samples.join("\n");
+
+        for literal_metaphor in ["宪法", "教义", "自由原则", "起草"] {
+            assert!(
+                !visible_copy.contains(literal_metaphor),
+                "Simplified Chinese setup copy should avoid {literal_metaphor}: {visible_copy}"
+            );
+        }
+        assert!(visible_copy.contains("协作准则"));
+        assert!(visible_copy.contains("自定义准则"));
+        assert!(visible_copy.contains("可选策略"));
+        assert!(visible_copy.contains("CodeWhale"));
+        assert!(visible_copy.contains("/constitution"));
+        assert!(visible_copy.contains("constitution.json"));
+    }
+
+    #[test]
     fn guided_constitution_requires_preview_before_save() {
         let mut view = SetupWizardView::new(SetupState::default(), Locale::En);
 
@@ -4193,8 +4231,8 @@ mod tests {
                     ),
                     Locale::ZhHans => (
                         "精简核心",
-                        "模块",
-                        "不会启用",
+                        "可选策略",
+                        "不会启用任何策略",
                         "不能授予或更改审批策略、沙箱、Shell、网络、信任、MCP 权限",
                         "发布或支出权限",
                     ),
@@ -5047,14 +5085,14 @@ mod tests {
         assert!(english.contains("powers and limits rather than deciding every case"));
         assert!(english.contains("but it is not memory"));
         assert!(zh_hans.contains("<codewhale_user_constitution"));
-        assert!(zh_hans.contains("按 G 批准并保存"));
-        assert!(zh_hans.contains("它界定权力与边界"));
+        assert!(zh_hans.contains("按 G 确认并保存"));
+        assert!(zh_hans.contains("它界定协作方式与行为边界"));
         assert!(zh_hans.contains("但它不是记忆"));
         assert_ne!(english, zh_hans);
 
         let localized_markers = [
             (Locale::Ja, "権限の階層"),
-            (Locale::ZhHans, "精简核心与可选模块"),
+            (Locale::ZhHans, "精简核心与可选策略"),
             (Locale::ZhHant, "精簡核心與可選模組"),
             (Locale::PtBr, "NÚCLEO REDUZIDO E MÓDULOS OPT-IN"),
             (Locale::Es419, "NÚCLEO REDUCIDO Y MÓDULOS OPT-IN"),

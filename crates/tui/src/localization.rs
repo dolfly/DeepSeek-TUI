@@ -2246,6 +2246,42 @@ mod tests {
     }
 
     #[test]
+    fn zh_hans_constitution_copy_uses_functional_terms() {
+        let messages = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+            locale_json_source(Locale::ZhHans),
+        )
+        .expect("zh-Hans locale json");
+
+        for (key, value) in &messages {
+            let Some(value) = value.as_str() else {
+                continue;
+            };
+            for literal_metaphor in ["宪法", "教义", "自由原则", "仓库法则"] {
+                assert!(
+                    !value.contains(literal_metaphor),
+                    "zh-Hans {key} should use functional terminology instead of {literal_metaphor}: {value}"
+                );
+            }
+        }
+
+        let setup_intro = tr(Locale::ZhHans, MessageId::SetupStepConstitutionWhy);
+        assert!(setup_intro.contains("CodeWhale"));
+        assert!(setup_intro.contains("协作准则"));
+        assert!(!setup_intro.contains("代码"));
+        let welcome = tr(Locale::ZhHans, MessageId::OnboardWelcomeLead);
+        assert!(welcome.contains("CodeWhale"));
+        assert!(!welcome.contains("代码"));
+        assert!(tr(Locale::ZhHans, MessageId::OnboardTipsLine2).contains("/constitution"));
+        assert!(
+            tr(
+                Locale::ZhHans,
+                MessageId::SetupConstitutionFileLoadedUnselected
+            )
+            .contains("constitution.json")
+        );
+    }
+
+    #[test]
     fn mode_picker_strings_are_translated_in_non_english_locales() {
         // The mode hints are full sentences; every shipped non-English locale
         // must provide a real translation rather than leaking the English
