@@ -380,6 +380,7 @@ const OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD: u32 = 272_000;
 /// OpenAI applies a higher price to the full request once these models exceed
 /// 272K input tokens. Until the pricing layer can represent request-wide tiers,
 /// refuse to report the lower static catalog price (#4317).
+/// https://developers.openai.com/api/docs/models/gpt-5.4
 /// https://developers.openai.com/api/docs/models/gpt-5.5
 /// https://developers.openai.com/api/docs/models/gpt-5.6-sol
 fn direct_openai_long_context_tier_is_unpriced(
@@ -390,8 +391,16 @@ fn direct_openai_long_context_tier_is_unpriced(
     let model_lower = model.trim().to_ascii_lowercase();
     let affected_model = matches!(
         model_lower.as_str(),
-        "gpt-5.5" | "gpt-5.6" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna"
-    ) || has_date_snapshot_suffix(&model_lower, "gpt-5.5-");
+        "gpt-5.4"
+            | "gpt-5.4-pro"
+            | "gpt-5.5"
+            | "gpt-5.6"
+            | "gpt-5.6-sol"
+            | "gpt-5.6-terra"
+            | "gpt-5.6-luna"
+    ) || has_date_snapshot_suffix(&model_lower, "gpt-5.4-")
+        || has_date_snapshot_suffix(&model_lower, "gpt-5.4-pro-")
+        || has_date_snapshot_suffix(&model_lower, "gpt-5.5-");
     provider == ApiProvider::Openai
         && input_tokens > OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD
         && affected_model
@@ -1167,6 +1176,36 @@ mod tests {
     }
 
     #[test]
+    fn direct_openai_gpt54_family_is_guarded_even_without_a_bundled_catalog_row() {
+        for model in ["gpt-5.4", "gpt-5.4-pro"] {
+            assert!(!direct_openai_long_context_tier_is_unpriced(
+                ApiProvider::Openai,
+                model,
+                OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD,
+            ));
+            assert!(direct_openai_long_context_tier_is_unpriced(
+                ApiProvider::Openai,
+                model,
+                OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD + 1,
+            ));
+
+            let above_boundary = Usage {
+                input_tokens: OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD + 1,
+                ..Usage::default()
+            };
+            assert!(
+                calculate_turn_cost_estimate_for_provider(
+                    ApiProvider::Openai,
+                    model,
+                    &above_boundary,
+                )
+                .is_none(),
+                "{model} must remain unpriced if a live catalog row is available"
+            );
+        }
+    }
+
+    #[test]
     fn openai_long_context_guard_is_exact_and_provider_scoped() {
         let input_tokens = OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD + 1;
 
@@ -1182,6 +1221,8 @@ mod tests {
             );
         }
         for model in [
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
             "gpt-5.5-pro",
             "gpt-5.5-pro-2026-04-23",
             "gpt-5.5-2026-04-23-extra",
@@ -1211,32 +1252,37 @@ mod tests {
     }
 
     #[test]
-    fn direct_openai_gpt55_snapshot_uses_the_same_strict_272k_boundary() {
-        let snapshot = "gpt-5.5-2026-04-23";
-
-        assert!(!direct_openai_long_context_tier_is_unpriced(
-            ApiProvider::Openai,
-            snapshot,
-            OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD,
-        ));
-        assert!(direct_openai_long_context_tier_is_unpriced(
-            ApiProvider::Openai,
-            snapshot,
-            OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD + 1,
-        ));
-
-        let above_boundary = Usage {
-            input_tokens: OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD + 1,
-            ..Usage::default()
-        };
-        assert!(
-            calculate_turn_cost_estimate_for_provider(
+    fn direct_openai_snapshots_use_the_same_strict_272k_boundary() {
+        for snapshot in [
+            "gpt-5.4-2026-03-05",
+            "gpt-5.4-pro-2026-03-05",
+            "gpt-5.5-2026-04-23",
+        ] {
+            assert!(!direct_openai_long_context_tier_is_unpriced(
                 ApiProvider::Openai,
                 snapshot,
-                &above_boundary,
-            )
-            .is_none()
-        );
+                OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD,
+            ));
+            assert!(direct_openai_long_context_tier_is_unpriced(
+                ApiProvider::Openai,
+                snapshot,
+                OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD + 1,
+            ));
+
+            let above_boundary = Usage {
+                input_tokens: OPENAI_LONG_CONTEXT_SURCHARGE_THRESHOLD + 1,
+                ..Usage::default()
+            };
+            assert!(
+                calculate_turn_cost_estimate_for_provider(
+                    ApiProvider::Openai,
+                    snapshot,
+                    &above_boundary,
+                )
+                .is_none(),
+                "{snapshot} must not report the lower static price above 272K"
+            );
+        }
     }
 
     #[test]
