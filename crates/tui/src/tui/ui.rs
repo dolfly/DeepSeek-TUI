@@ -10327,8 +10327,9 @@ fn render(f: &mut Frame, app: &mut App, config: &Config) {
             .saturating_add(composer_height)
             .saturating_add(footer_height),
     );
-    // Preserve the direct send-now hint when the terminal has breathing room,
-    // while keeping the release-floor layout to three compact rows.
+    // Queued-only previews author the direct controls in row two (and fall
+    // back to controls-only when just one row remains). Mixed previews retain
+    // up to three compact rows at the release floor.
     let preview_cap = if size.height >= 20 { 4 } else { 3 };
     let preview_height = desired_preview_height.min(auxiliary_budget.min(preview_cap));
     let workflow_panel_height =

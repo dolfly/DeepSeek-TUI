@@ -624,7 +624,7 @@ fn approval_modal_real_rows_survive_wheel_resize_and_deny_without_side_effect() 
 fn work_and_permission_are_visible_at_release_terminal_sizes() -> anyhow::Result<()> {
     let _guard = qa_pty_test_lock();
 
-    for (cols, rows) in [(120_u16, 32_u16), (100, 30), (80, 24)] {
+    for (cols, rows) in [(120_u16, 32_u16), (100, 30), (80, 24), (60, 16), (40, 12)] {
         let ws = make_sealed_workspace()?;
         let codewhale_home = ws.home().join(".codewhale");
         let codex_home = ws.home().join(".codex");

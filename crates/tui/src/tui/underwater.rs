@@ -666,15 +666,17 @@ pub fn render_header(area: Rect, buf: &mut Buffer, app: &App) {
                     .add_modifier(Modifier::BOLD),
             ));
         }
-        left.push(Span::styled(
-            " · ",
-            Style::default().fg(app.ui_theme.text_dim),
-        ));
-        left.push(Span::styled(
-            permission_label(app),
-            Style::default().fg(app.ui_theme.text_muted),
-        ));
     }
+    // Permission is safety state, not optional chrome. Compact terminals shed
+    // the status mark and context meter, but keep the effective posture.
+    left.push(Span::styled(
+        " · ",
+        Style::default().fg(app.ui_theme.text_dim),
+    ));
+    left.push(Span::styled(
+        permission_label(app),
+        Style::default().fg(app.ui_theme.text_muted),
+    ));
 
     let mut right = Vec::new();
     if tier != ShellTier::Compact
@@ -707,6 +709,16 @@ pub fn render_header(area: Rect, buf: &mut Buffer, app: &App) {
     let right_width = span_width(&right);
     let left_budget = available.saturating_sub(right_width + usize::from(right_width > 0));
     if span_width(&left) > left_budget {
+        let mode = mode_label(app.ui_locale, app.mode);
+        let permission = permission_label(app);
+        let suffix = vec![
+            Span::styled(" · ", Style::default().fg(app.ui_theme.text_dim)),
+            Span::styled(mode, Style::default().fg(app.ui_theme.accent_primary)),
+            Span::styled(" · ", Style::default().fg(app.ui_theme.text_dim)),
+            Span::styled(permission, Style::default().fg(app.ui_theme.text_muted)),
+        ];
+        let fixed_width = 4usize.saturating_add(span_width(&suffix));
+        let model_budget = left_budget.saturating_sub(fixed_width);
         left = vec![
             Span::styled(
                 "cw",
@@ -716,15 +728,11 @@ pub fn render_header(area: Rect, buf: &mut Buffer, app: &App) {
             ),
             Span::raw("  "),
             Span::styled(
-                truncate_to_width(&app.model_display_label(), left_budget.saturating_sub(7)),
+                truncate_to_width(&app.model_display_label(), model_budget),
                 Style::default().fg(app.ui_theme.text_muted),
             ),
-            Span::styled(" · ", Style::default().fg(app.ui_theme.text_dim)),
-            Span::styled(
-                mode_label(app.ui_locale, app.mode),
-                Style::default().fg(app.ui_theme.accent_primary),
-            ),
         ];
+        left.extend(suffix);
     }
     let left_width = span_width(&left);
     let gap = available.saturating_sub(left_width + right_width);
@@ -907,6 +915,33 @@ mod tests {
         let mut buf = Buffer::empty(area);
         render_footer(area, &mut buf, app);
         (0..area.width).map(|x| buf[(x, 0)].symbol()).collect()
+    }
+
+    fn header_text(app: &App, width: u16) -> String {
+        let area = Rect::new(0, 0, width, 1);
+        let mut buf = Buffer::empty(area);
+        render_header(area, &mut buf, app);
+        (0..width).map(|x| buf[(x, 0)].symbol()).collect()
+    }
+
+    #[test]
+    fn compact_header_keeps_mode_and_effective_permission() {
+        let mut app = test_app();
+        app.mode = AppMode::Operate;
+        app.approval_mode = ApprovalMode::Bypass;
+        app.model = "provider/model-with-a-deliberately-long-route-name".to_string();
+
+        let header = header_text(&app, 40);
+
+        assert!(header.starts_with("cw"), "brand missing: {header:?}");
+        assert!(
+            header.to_ascii_lowercase().contains("operate"),
+            "mode missing: {header:?}"
+        );
+        assert!(
+            header.contains("Full Access"),
+            "permission posture missing: {header:?}"
+        );
     }
 
     /// The footer consumes the toast system, not the legacy status sink: an

@@ -641,7 +641,7 @@ async fn release_queued_steering_ctrl_s_sends_now_with_clear_status() -> Result<
     wait_for_counter(&mut tui, &initial_requests, 1, Duration::from_secs(3))?;
 
     type_and_tab(&mut tui, "queued steering from ctrl-s")?;
-    tui.wait_for_text("Ctrl+S send now", Duration::from_secs(5))?;
+    tui.wait_for_text("Ctrl+S send", Duration::from_secs(5))?;
     assert!(
         tui.frame().contains("queued steering from ctrl-s"),
         "queued steering preview was not readable:\n{}",
