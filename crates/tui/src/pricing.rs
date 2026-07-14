@@ -384,8 +384,15 @@ fn minimax_m3_standard_pricing(long_context: bool) -> ModelPricing {
     }
 }
 
+fn is_minimax_m3(model: &str) -> bool {
+    matches!(
+        model.trim().to_ascii_lowercase().as_str(),
+        "minimax-m3" | "minimax/minimax-m3"
+    )
+}
+
 fn pricing_for_model_and_usage(model: &str, usage: &Usage) -> Option<ModelPricing> {
-    if model.trim().eq_ignore_ascii_case("minimax-m3") {
+    if is_minimax_m3(model) {
         return Some(minimax_m3_standard_pricing(
             usage.input_tokens > MINIMAX_M3_LONG_CONTEXT_THRESHOLD,
         ));
@@ -783,7 +790,7 @@ pub fn calculate_cache_savings(model: &str, cache_hit_tokens: u32) -> Option<Cos
     // M3's cache-read savings depend on whether total input crosses 512k;
     // this helper receives only cache-hit tokens, so an estimate would guess
     // the tier. The full turn-cost path has total input and remains precise.
-    if model.trim().eq_ignore_ascii_case("minimax-m3") {
+    if is_minimax_m3(model) {
         return None;
     }
     let pricing = pricing_for_model(model)?;
@@ -1057,19 +1064,21 @@ mod tests {
 
     #[test]
     fn minimax_m3_standard_pricing_tracks_the_512k_input_boundary() {
-        for (input_tokens, cache_read, input, output) in
-            [(512_000, 0.06, 0.30, 1.20), (512_001, 0.12, 0.60, 2.40)]
-        {
-            let usage = Usage {
-                input_tokens,
-                ..Usage::default()
-            };
-            let pricing = pricing_for_model_and_usage("MiniMax-M3", &usage).expect("M3 pricing");
-            assert_eq!(pricing.usd.input_cache_hit_per_million, cache_read);
-            assert_eq!(pricing.usd.input_cache_miss_per_million, input);
-            assert_eq!(pricing.usd.output_per_million, output);
+        for model in ["MiniMax-M3", "minimax/minimax-m3"] {
+            for (input_tokens, cache_read, input, output) in
+                [(512_000, 0.06, 0.30, 1.20), (512_001, 0.12, 0.60, 2.40)]
+            {
+                let usage = Usage {
+                    input_tokens,
+                    ..Usage::default()
+                };
+                let pricing = pricing_for_model_and_usage(model, &usage).expect("M3 pricing");
+                assert_eq!(pricing.usd.input_cache_hit_per_million, cache_read);
+                assert_eq!(pricing.usd.input_cache_miss_per_million, input);
+                assert_eq!(pricing.usd.output_per_million, output);
+            }
+            assert!(calculate_cache_savings(model, 1).is_none());
         }
-        assert!(calculate_cache_savings("MiniMax-M3", 1).is_none());
     }
 
     #[test]
