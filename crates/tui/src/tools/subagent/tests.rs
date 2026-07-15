@@ -8,6 +8,61 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tempfile::{Builder as TempDirBuilder, tempdir};
 
+#[test]
+fn generated_whale_names_follow_session_language_without_mixing() {
+    let localized_pools: &[(&str, &[&str])] = &[
+        ("ja", WHALE_NICKNAMES_JA),
+        ("zh-Hant", WHALE_NICKNAMES_ZH_HANT),
+        ("pt-BR", WHALE_NICKNAMES_PT_BR),
+        ("es-419", WHALE_NICKNAMES_ES_419),
+        ("vi", WHALE_NICKNAMES_VI),
+        ("ko", WHALE_NICKNAMES_KO),
+    ];
+
+    for index in 0..64 {
+        let id = format!("agent_locale_{index}");
+        let english = whale_name_for_id_in_locale(&id, "en");
+        let chinese = whale_name_for_id_in_locale(&id, "zh-Hans");
+
+        assert!(english.is_ascii(), "English name leaked locale: {english}");
+        assert!(
+            !chinese.is_ascii(),
+            "Chinese name fell back to English: {chinese}"
+        );
+        let english_index = WHALE_NICKNAMES
+            .iter()
+            .position(|candidate| *candidate == english)
+            .expect("English generated name belongs to the curated pool");
+        assert_eq!(english_index % 2, 0);
+        assert_eq!(WHALE_NICKNAMES[english_index + 1], chinese);
+
+        for (locale, pool) in localized_pools {
+            let generated = whale_name_for_id_in_locale(&id, locale);
+            assert!(
+                pool.contains(&generated.as_str()),
+                "{locale} generated a name from another language: {generated}"
+            );
+        }
+    }
+
+    assert_eq!(
+        whale_name_for_id_in_locale("fallback", "unknown"),
+        whale_name_for_id_in_locale("fallback", "en")
+    );
+}
+
+#[test]
+fn locale_matched_whale_collision_suffix_stays_in_language() {
+    let id = "agent_locale_collision";
+    let base = whale_name_for_id_in_locale(id, "zh-Hans");
+    let active = HashSet::from([base.clone()]);
+    let unique = assign_unique_whale_name_in_locale(id, &active, "zh-Hans");
+
+    assert_ne!(unique, base);
+    assert!(unique.starts_with(&base));
+    assert!(!unique.is_ascii());
+}
+
 fn make_assignment() -> SubAgentAssignment {
     SubAgentAssignment::new("prompt".to_string(), Some("worker".to_string()))
 }
@@ -5074,6 +5129,7 @@ fn stub_runtime() -> SubAgentRuntime {
         client: stub_client(),
         api_config: None,
         model: "deepseek-v4-flash".to_string(),
+        locale_tag: "en".to_string(),
         auto_model: false,
         reasoning_effort: None,
         reasoning_effort_auto: false,

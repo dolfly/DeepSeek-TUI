@@ -8115,6 +8115,14 @@ async fn build_direct_workflow_tool(
         Some(event_tx),
         manager.clone(),
     )
+    .with_locale_tag(
+        crate::localization::resolve_locale(
+            &crate::settings::Settings::load_persisted()
+                .unwrap_or_default()
+                .locale,
+        )
+        .tag(),
+    )
     .with_role_models(role_models)
     .with_api_config(config.clone())
     .with_fleet_roster(roster)
