@@ -6,7 +6,10 @@ const {
   BUNDLE_CHECKSUM_MANIFEST,
   checksummedReleaseAssetNames,
   checksumManifestUrl,
+  CNB_BINARY_ASSET_NAMES,
+  CNB_RELEASE_ASSET_NAMES,
   releaseAssetUrl,
+  usesCnbMirror,
 } = require("./artifacts");
 
 const pkg = require("../package.json");
@@ -296,7 +299,8 @@ function assertChecksumManifestIncludes(checksums, expectedAssets, label) {
 async function run() {
   const version = resolveBinaryVersion();
   const repo = resolveRepo();
-  const assets = allReleaseAssetNames();
+  const cnbMirror = usesCnbMirror();
+  const assets = cnbMirror ? CNB_RELEASE_ASSET_NAMES : allReleaseAssetNames();
 
   assertPackageVersionMatchesBinaryVersion(version);
 
@@ -316,17 +320,19 @@ async function run() {
   );
   assertChecksumManifestIncludes(
     checksums,
-    checksummedReleaseAssetNames(),
+    cnbMirror ? CNB_BINARY_ASSET_NAMES : checksummedReleaseAssetNames(),
     "Canonical checksum manifest",
   );
-  const bundleChecksums = parseChecksumManifest(
-    await downloadText(releaseAssetUrl(BUNDLE_CHECKSUM_MANIFEST, version, repo)),
-  );
-  assertChecksumManifestIncludes(
-    bundleChecksums,
-    BUNDLE_ASSET_NAMES,
-    "Bundle checksum manifest",
-  );
+  if (!cnbMirror) {
+    const bundleChecksums = parseChecksumManifest(
+      await downloadText(releaseAssetUrl(BUNDLE_CHECKSUM_MANIFEST, version, repo)),
+    );
+    assertChecksumManifestIncludes(
+      bundleChecksums,
+      BUNDLE_ASSET_NAMES,
+      "Bundle checksum manifest",
+    );
+  }
   console.log("Release assets verified.");
 }
 

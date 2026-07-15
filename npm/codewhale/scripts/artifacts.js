@@ -5,6 +5,16 @@ const CHECKSUM_MANIFEST = "codewhale-artifacts-sha256.txt";
 const BUNDLE_CHECKSUM_MANIFEST = "codewhale-bundles-sha256.txt";
 const WINDOWS_INSTALLER_ASSET = "CodeWhaleSetup.exe";
 
+const CNB_BINARY_ASSET_NAMES = [
+  "codewhale-linux-x64",
+  "codew-linux-x64",
+  "codewhale-tui-linux-x64",
+];
+const CNB_RELEASE_ASSET_NAMES = [
+  ...CNB_BINARY_ASSET_NAMES,
+  CHECKSUM_MANIFEST,
+];
+
 const BUNDLE_ASSET_NAMES = [
   "codewhale-linux-x64.tar.gz",
   "codewhale-linux-arm64.tar.gz",
@@ -117,10 +127,36 @@ function releaseBaseUrl(version, repo = "Hmbown/CodeWhale") {
   }
   // When CODEWHALE_USE_CNB_MIRROR is set, use the CNB (China-friendly)
   // mirror that already builds and publishes binary release assets.
-  if (process.env.CODEWHALE_USE_CNB_MIRROR) {
+  if (usesCnbMirror()) {
+    assertCnbMirrorSupportedPlatform();
     return `https://cnb.cool/codewhale.net/codewhale/-/releases/v${version}/`;
   }
   return `https://github.com/${repo}/releases/download/v${version}/`;
+}
+
+function usesCnbMirror(env = process.env) {
+  const hasExplicitBase = Boolean(
+    env.CODEWHALE_RELEASE_BASE_URL ||
+      env.DEEPSEEK_TUI_RELEASE_BASE_URL ||
+      env.DEEPSEEK_RELEASE_BASE_URL,
+  );
+  return !hasExplicitBase && Boolean(env.CODEWHALE_USE_CNB_MIRROR);
+}
+
+function assertCnbMirrorSupportedPlatform(
+  rawPlatform = os.platform(),
+  arch = os.arch(),
+) {
+  const platform = PLATFORM_ALIASES[rawPlatform] || rawPlatform;
+  if (platform === "linux" && arch === "x64") {
+    return;
+  }
+  throw new Error(
+    "CODEWHALE_USE_CNB_MIRROR=1 currently supports only Linux x64 " +
+      `(including OpenHarmony x64); detected ${rawPlatform} ${arch}. ` +
+      "Use the GitHub Release or set CODEWHALE_RELEASE_BASE_URL to a " +
+      "complete mirror for this platform.",
+  );
 }
 
 function releaseAssetUrl(baseName, version, repo = "Hmbown/CodeWhale") {
@@ -162,15 +198,19 @@ function checksummedReleaseAssetNames() {
 module.exports = {
   allAssetNames,
   allReleaseAssetNames,
+  assertCnbMirrorSupportedPlatform,
   BUNDLE_ASSET_NAMES,
   BUNDLE_CHECKSUM_MANIFEST,
   CHECKSUM_MANIFEST,
   checksummedReleaseAssetNames,
+  CNB_BINARY_ASSET_NAMES,
+  CNB_RELEASE_ASSET_NAMES,
   checksumManifestUrl,
   detectBinaryNames,
   executableName,
   releaseAssetUrl,
   releaseBaseUrl,
   releaseBinaryDirectory,
+  usesCnbMirror,
   WINDOWS_INSTALLER_ASSET,
 };

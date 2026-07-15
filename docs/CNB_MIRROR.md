@@ -57,6 +57,7 @@ When CNB receives a `v*` tag, the root `.cnb.yml` tag pipeline builds Linux x64
 release assets from source and publishes a CNB release with:
 
 - `codewhale-linux-x64`
+- `codew-linux-x64`
 - `codewhale-tui-linux-x64`
 - `codewhale-artifacts-sha256.txt`
 
@@ -162,9 +163,12 @@ behind GitHub-blocking networks should use one of these paths:
   [INSTALL.md](INSTALL.md#4-install-via-cargo-any-tier-1-rust-target).
 
 - **CNB release assets** for Linux x64, when the matching CNB tag pipeline has
-  completed successfully. Download `codewhale-linux-x64`,
+  completed successfully. Download `codewhale-linux-x64`, `codew-linux-x64`,
   `codewhale-tui-linux-x64`, and `codewhale-artifacts-sha256.txt` from the CNB
-  release for `vX.Y.Z`, then verify the binaries against the manifest.
+  release for `vX.Y.Z`, then verify the binaries against the manifest. The npm
+  wrapper can select this source with `CODEWHALE_USE_CNB_MIRROR=1` on Linux x64
+  and OpenHarmony x64 only; other platforms must use GitHub or a complete
+  `CODEWHALE_RELEASE_BASE_URL` mirror.
 
 - **`DEEPSEEK_TUI_RELEASE_BASE_URL`** environment variable, if a
   CDN mirror of release assets exists. The npm
