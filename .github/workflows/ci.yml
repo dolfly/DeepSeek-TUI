@@ -274,6 +274,9 @@ jobs:
     # runs-on can never evaluate to empty.
     runs-on: ${{ needs.changes.outputs.heavy == 'true' && matrix.os || 'ubuntu-latest' }}
     strategy:
+      # A failure on one desktop platform must not erase evidence from the
+      # other one. We need both conclusions to diagnose and release safely.
+      fail-fast: false
       matrix:
         # Linux workspace tests moved to CNB; GitHub keeps the platform
         # coverage CNB cannot provide.

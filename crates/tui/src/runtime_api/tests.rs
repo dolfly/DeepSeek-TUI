@@ -844,14 +844,37 @@ fn write_fake_fleet_binary(root: &Path, marker: &Path) -> Result<PathBuf> {
 
 #[cfg(windows)]
 fn write_fake_fleet_binary(root: &Path, marker: &Path) -> Result<PathBuf> {
-    let binary = root.join("fake-codewhale.cmd");
-    fs::write(
-        &binary,
-        format!(
-            "@echo off\r\ntype nul > \"{}\"\r\necho {{\"type\":\"content\",\"content\":\"restarted through Runtime API\"}}\r\nping -n 2 127.0.0.1 >NUL\r\nexit /b 0\r\n",
-            marker.display()
-        ),
-    )?;
+    // Exercise the same executable/Job Object path as a released Windows
+    // Codewhale binary. A `.cmd` fake introduces an extra `cmd.exe` wrapper
+    // whose lifetime can end before the Fleet host attaches its Job Object,
+    // making the test race a process topology production does not use.
+    let source = root.join("fake-codewhale.rs");
+    let binary = root.join("fake-codewhale.exe");
+    let helper = format!(
+        r##"fn main() {{
+    std::fs::File::create({marker:?}).expect("create Fleet restart marker");
+    println!("{{}}", r#"{{"type":"content","content":"restarted through Runtime API"}}"#);
+    std::thread::sleep(std::time::Duration::from_millis(750));
+}}
+"##,
+        marker = marker.to_string_lossy().as_ref(),
+    );
+    fs::write(&source, helper)?;
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let output = std::process::Command::new(rustc)
+        .arg("--edition=2024")
+        .arg("--crate-name=codewhale_fleet_test_helper")
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .context("compile Windows Fleet restart helper")?;
+    if !output.status.success() {
+        bail!(
+            "failed to compile Windows Fleet restart helper: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     Ok(binary)
 }
 
