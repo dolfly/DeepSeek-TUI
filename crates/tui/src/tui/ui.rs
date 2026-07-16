@@ -260,6 +260,38 @@ fn session_denied_notice(app: &App, tool_name: &str) -> String {
         .replace("{tool}", tool_name)
 }
 
+fn surface_session_denied_notice(app: &mut App, tool_name: &str) {
+    let notice = session_denied_notice(app, tool_name);
+    app.status_message = Some(notice.clone());
+    app.push_status_toast(notice.clone(), StatusToastLevel::Warning, Some(12_000));
+
+    // Tool completion and turn completion can replace the one-line status
+    // before the next frame is painted. Keep the recovery path in the
+    // transcript as a settled receipt as well, where it survives that event
+    // ordering and remains available to screen readers and scrollback.
+    let latest_transcript_cell = app
+        .active_cell
+        .as_ref()
+        .and_then(|cell| cell.entries().last())
+        .or_else(|| app.history.last());
+    let already_latest_receipt = matches!(
+        latest_transcript_cell,
+        Some(HistoryCell::System { content }) if content == &notice
+    );
+    if !already_latest_receipt {
+        let receipt = HistoryCell::System { content: notice };
+        if let Some(active_cell) = app.active_cell.as_mut() {
+            // Never grow committed history underneath an active cell: tool
+            // lookup indices address `history ++ active_cell`, so changing
+            // history.len() mid-turn would retarget the pending completion.
+            active_cell.push_untracked(receipt);
+            app.bump_active_cell_revision();
+        } else {
+            app.add_message(receipt);
+        }
+    }
+}
+
 fn should_auto_approve_approval_request(
     app: &App,
     tool_name: &str,
@@ -3454,9 +3486,7 @@ async fn run_event_loop(
                                 }),
                             );
                             let _ = engine_handle.deny_tool_call(id.clone()).await;
-                            let notice = session_denied_notice(app, &tool_name);
-                            app.status_message = Some(notice.clone());
-                            app.push_status_toast(notice, StatusToastLevel::Warning, Some(12_000));
+                            surface_session_denied_notice(app, &tool_name);
                         } else if should_auto_approve_approval_request(
                             app,
                             &tool_name,

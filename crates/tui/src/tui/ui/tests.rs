@@ -2342,6 +2342,117 @@ fn session_denied_notice_explains_cached_decision_and_recovery() {
     assert!(notice.contains("Restart Codewhale"));
 }
 
+#[tokio::test]
+async fn cached_denial_explanation_survives_tool_completion_and_done_render() {
+    use crate::core::engine::MockApprovalEvent;
+    use crate::tools::spec::ToolError;
+    use crate::tui::ocean::OceanTreatment;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let mut app = create_test_app();
+    app.onboarding = OnboardingState::None;
+    app.launch.visible = false;
+    app.ocean_treatment = OceanTreatment::Ombre;
+    app.is_loading = true;
+    app.runtime_turn_status = Some("in_progress".to_string());
+
+    let tool_id = "cached-shell-denial";
+    let tool_name = "exec_shell";
+    handle_tool_call_started(
+        &mut app,
+        tool_id,
+        tool_name,
+        &serde_json::json!({"command": "printf cached-denial"}),
+    );
+
+    // Mirror the cached ApprovalRequired branch: send the denial back to the
+    // blocked engine, then project the explanation into the UI.
+    let mut engine = mock_engine_handle();
+    engine
+        .handle
+        .deny_tool_call(tool_id)
+        .await
+        .expect("send cached denial");
+    surface_session_denied_notice(&mut app, tool_name);
+    assert!(matches!(
+        engine.recv_approval_event().await,
+        Some(MockApprovalEvent::Denied { id }) if id == tool_id
+    ));
+
+    // These are the events that immediately follow the auto-deny in a real
+    // turn. A later generic status is deliberately applied too: the detailed
+    // recovery receipt must not depend on winning the one-line status race.
+    let result = Err(ToolError::permission_denied(
+        "Tool 'exec_shell' denied by user".to_string(),
+    ));
+    handle_tool_call_complete(&mut app, tool_id, tool_name, &result);
+    app.flush_active_cell();
+
+    let denied_tool_index = app
+        .history
+        .iter()
+        .position(|cell| {
+            matches!(
+                cell,
+                HistoryCell::Tool(ToolCell::Exec(exec))
+                    if exec.command == "printf cached-denial"
+                        && exec.status == ToolStatus::Failed
+            )
+        })
+        .expect("cached denial must settle the pending tool as failed");
+    let recovery_receipt_index = app
+        .history
+        .iter()
+        .position(|cell| {
+            matches!(
+                cell,
+                HistoryCell::System { content }
+                    if content.contains("Auto-denied exec_shell")
+                        && content.contains("Restart Codewhale")
+            )
+        })
+        .expect("cached denial must leave a durable recovery receipt");
+    assert!(
+        denied_tool_index < recovery_receipt_index,
+        "recovery receipt must follow the tool it explains"
+    );
+
+    app.is_loading = false;
+    app.runtime_turn_status = Some("completed".to_string());
+    app.status_message = Some("Tool 'exec_shell' denied by user".to_string());
+    app.sync_status_message_to_toasts();
+
+    let config = Config::default();
+    let backend = TestBackend::new(89, 24);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame| render(frame, &mut app, &config))
+        .expect("render completed denial sequence");
+    let buffer = terminal.backend().buffer();
+    let rendered = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered.contains("Auto-denied exec_shell"),
+        "cached-decision explanation disappeared after completion:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Restart Codewhale"),
+        "cached-denial recovery path disappeared after completion:\n{rendered}"
+    );
+    assert_eq!(
+        app.view_stack.top_kind(),
+        None,
+        "cache hit must not re-prompt"
+    );
+}
+
 #[test]
 fn session_approved_cache_keeps_tool_name_session_grants() {
     let mut app = create_test_app();
