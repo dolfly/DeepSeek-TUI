@@ -567,6 +567,7 @@
     "ApprovalOptionDeny": "Denegar esta llamada",
     "ApprovalOptionAbortTurn": "Abortar turno",
     "ApprovalBlockTitle": "aprobación",
+    "ApprovalSessionDeniedCached": "Se rechazó automáticamente {tool}: ya habías rechazado esta acción en la sesión. Reinicia Codewhale para reconsiderarla.",
     "ApprovalControlsHint": "  ·  Pg↑/↓ revisar  ·  v detalles  ·  Esc abortar",
     "ApprovalChooseHint": "Elegir: ",
     "ApprovalChooseAction": "Enter para seleccionar, o presione y/a/d directamente",

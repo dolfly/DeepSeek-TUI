@@ -569,6 +569,7 @@
     "ApprovalOptionDeny": "Deny this call",
     "ApprovalOptionAbortTurn": "Abort the turn",
     "ApprovalBlockTitle": "approval",
+    "ApprovalSessionDeniedCached": "Auto-denied {tool}: you denied this exact action earlier in this session. Restart Codewhale to reconsider it.",
     "ApprovalControlsHint": "  ·  Pg↑/↓ review  ·  v details  ·  Esc abort",
     "ApprovalChooseHint": "Choose: ",
     "ApprovalChooseAction": "Enter selected option, or press y/a/d directly",

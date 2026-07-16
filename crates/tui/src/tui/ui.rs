@@ -255,6 +255,11 @@ fn is_session_denied_for_key(app: &App, approval_key: &str) -> bool {
     app.approval_session_denied.contains(approval_key)
 }
 
+fn session_denied_notice(app: &App, tool_name: &str) -> String {
+    app.tr(MessageId::ApprovalSessionDeniedCached)
+        .replace("{tool}", tool_name)
+}
+
 fn should_auto_approve_approval_request(
     app: &App,
     tool_name: &str,
@@ -3449,6 +3454,9 @@ async fn run_event_loop(
                                 }),
                             );
                             let _ = engine_handle.deny_tool_call(id.clone()).await;
+                            let notice = session_denied_notice(app, &tool_name);
+                            app.status_message = Some(notice.clone());
+                            app.push_status_toast(notice, StatusToastLevel::Warning, Some(12_000));
                         } else if should_auto_approve_approval_request(
                             app,
                             &tool_name,

@@ -2292,6 +2292,16 @@ fn session_denied_cache_matches_only_approval_key() {
 }
 
 #[test]
+fn session_denied_notice_explains_cached_decision_and_recovery() {
+    let app = create_test_app();
+    let notice = session_denied_notice(&app, "exec_shell");
+
+    assert!(notice.contains("exec_shell"));
+    assert!(notice.contains("earlier in this session"));
+    assert!(notice.contains("Restart Codewhale"));
+}
+
+#[test]
 fn session_approved_cache_keeps_tool_name_session_grants() {
     let mut app = create_test_app();
     app.approval_session_approved

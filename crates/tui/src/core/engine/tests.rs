@@ -3776,9 +3776,7 @@ async fn operate_model_shell_uses_normal_approval_and_workspace_sandbox() {
         .send(Op::SendMessage {
             content: "write the requested local fixture".to_string(),
             mode: AppMode::Operate,
-            provider: None,
-            model: crate::config::DEFAULT_TEXT_MODEL.to_string(),
-            route_limits: None,
+            route: resolved_route_for_test(&api_config, crate::config::DEFAULT_TEXT_MODEL),
             compaction: Box::new(CompactionConfig::default()),
             goal_objective: None,
             goal_token_budget: None,

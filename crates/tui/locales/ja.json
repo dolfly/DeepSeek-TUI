@@ -567,6 +567,7 @@
     "ApprovalOptionDeny": "拒否",
     "ApprovalOptionAbortTurn": "中断",
     "ApprovalBlockTitle": "承認",
+    "ApprovalSessionDeniedCached": "{tool} は自動的に拒否されました。この操作はこのセッションで以前拒否されています。再検討するには Codewhale を再起動してください。",
     "ApprovalControlsHint": "  ·  Pg↑/↓ 履歴  ·  v 詳細  ·  Esc 中止",
     "ApprovalChooseHint": "選択：",
     "ApprovalChooseAction": "Enterで選択、または y/a/d を直接入力",
