@@ -4286,7 +4286,7 @@ async fn run_event_loop(
                             open_text_pager(
                                 app,
                                 title,
-                                include_str!("../../../../CHANGELOG.md").to_string(),
+                                include_str!("../../CHANGELOG.md").to_string(),
                             );
                         }
                         crate::tui::underwater::LaunchAction::Quit => {
@@ -4737,11 +4737,7 @@ async fn run_event_loop(
                     }
                     crate::tui::underwater::LaunchAction::Changelog => {
                         let title = app.tr(MessageId::LaunchMenuChangelog).into_owned();
-                        open_text_pager(
-                            app,
-                            title,
-                            include_str!("../../../../CHANGELOG.md").to_string(),
-                        );
+                        open_text_pager(app, title, include_str!("../../CHANGELOG.md").to_string());
                     }
                     crate::tui::underwater::LaunchAction::Quit => {
                         let _ = engine_handle.send(Op::Shutdown).await;
