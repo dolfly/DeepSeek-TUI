@@ -345,6 +345,8 @@ fn messages_from_thread_detail_batches_tool_results() {
             ),
         ],
         latest_seq: 0,
+        pending_approvals: Vec::new(),
+        pending_user_inputs: Vec::new(),
     };
 
     let messages = messages_from_thread_detail(&detail);
@@ -418,6 +420,8 @@ fn legacy_exact_thread_export_normalizes_provider_kind_and_id() {
         turns: Vec::new(),
         items: Vec::new(),
         latest_seq: 0,
+        pending_approvals: Vec::new(),
+        pending_user_inputs: Vec::new(),
     };
     let config = Config {
         provider: Some("lm-studio".to_string()),
@@ -612,6 +616,7 @@ struct TestServerOverrides {
     fleet_codewhale_binary: Option<String>,
     config_path: Option<PathBuf>,
     config_profile: Option<String>,
+    web: Option<web::RuntimeWebState>,
 }
 
 async fn spawn_test_server_with_root_token_mobile_workspace_and_subagents(
@@ -698,6 +703,12 @@ async fn spawn_test_server_with_root_token_mobile_workspace_and_overrides(
     let sub_agent_manager = overrides
         .sub_agent_manager
         .unwrap_or_else(|| runtime_api_sub_agent_manager(&workspace, 2));
+    let listener = match TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    let addr = listener.local_addr()?;
     let state = RuntimeApiState {
         config: Arc::new(parking_lot::RwLock::new(config)),
         workspace,
@@ -716,21 +727,20 @@ async fn spawn_test_server_with_root_token_mobile_workspace_and_overrides(
         )),
         auth_required,
         bind_host: "127.0.0.1".to_string(),
-        bind_port: 0,
+        bind_port: addr.port(),
         mobile_enabled,
+        web: overrides.web,
         fleet_codewhale_binary: overrides
             .fleet_codewhale_binary
             .unwrap_or_else(configured_codewhale_binary),
     };
     let app = build_router(state);
-    let listener = match TcpListener::bind("127.0.0.1:0").await {
-        Ok(listener) => listener,
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return Ok(None),
-        Err(err) => return Err(err.into()),
-    };
-    let addr = listener.local_addr()?;
     let handle = tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
     });
     Ok(Some((addr, runtime_threads, handle)))
 }
@@ -1157,6 +1167,158 @@ async fn runtime_token_guard_protects_v1_routes() -> Result<()> {
         .error_for_status()?;
     assert_eq!(deepseek_header.status(), StatusCode::OK);
 
+    handle.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn web_bootstrap_sets_strict_cookie_once_and_preserves_v1_auth() -> Result<()> {
+    let root = std::env::temp_dir().join(format!("codewhale-web-api-{}", Uuid::new_v4()));
+    let sessions_dir = root.join("sessions");
+    let workspace = root.join("workspace");
+    let token = "cwrt_runtime_secret_never_in_browser_storage".to_string();
+    let (web, nonce) = web::RuntimeWebState::new();
+    let Some((addr, _runtime_threads, handle)) =
+        spawn_test_server_with_root_token_mobile_workspace_and_overrides(
+            root,
+            sessions_dir,
+            Some(token.clone()),
+            false,
+            workspace,
+            TestServerOverrides {
+                web: Some(web),
+                ..TestServerOverrides::default()
+            },
+        )
+        .await?
+    else {
+        return Ok(());
+    };
+    let client = crate::tls::reqwest_client_builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+
+    let page = client.get(format!("http://{addr}/")).send().await?;
+    assert_eq!(page.status(), StatusCode::OK);
+    assert_eq!(
+        page.headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|value| value.to_str().ok()),
+        Some(
+            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+        )
+    );
+    let page_body = page.text().await?;
+    assert!(!page_body.contains(&token));
+    assert!(!page_body.contains(&nonce));
+
+    let wrong = client
+        .get(format!(
+            "http://{addr}/__codewhale/bootstrap/cwwb_00000000000000000000000000000000"
+        ))
+        .send()
+        .await?;
+    assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+
+    let exchange = client
+        .get(format!("http://{addr}/__codewhale/bootstrap/{nonce}"))
+        .send()
+        .await?;
+    assert_eq!(exchange.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        exchange
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("/")
+    );
+    let set_cookie = exchange
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .context("missing bootstrap Set-Cookie")?
+        .to_string();
+    assert!(set_cookie.starts_with("codewhale_web_session=cwws_"));
+    assert!(set_cookie.ends_with("; HttpOnly; SameSite=Strict; Path=/"));
+    assert!(!set_cookie.contains(&token));
+
+    let unauthorized = client
+        .get(format!("http://{addr}/v1/threads/summary"))
+        .send()
+        .await?;
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let cookie_pair = set_cookie
+        .split(';')
+        .next()
+        .context("missing web session cookie pair")?;
+    let authorized = client
+        .get(format!("http://{addr}/v1/threads/summary"))
+        .header(header::COOKIE, cookie_pair)
+        .send()
+        .await?;
+    assert_eq!(authorized.status(), StatusCode::OK);
+
+    let same_origin_cookie_post = client
+        .post(format!("http://{addr}/v1/threads"))
+        .header(header::COOKIE, cookie_pair)
+        .header(header::ORIGIN, format!("http://{addr}"))
+        .header("sec-fetch-site", "same-origin")
+        .json(&json!({}))
+        .send()
+        .await?;
+    assert_eq!(same_origin_cookie_post.status(), StatusCode::CREATED);
+
+    let cross_origin_cookie_post = client
+        .post(format!("http://{addr}/v1/threads"))
+        .header(header::COOKIE, cookie_pair)
+        .header(header::ORIGIN, "http://127.0.0.1:3000")
+        .header("sec-fetch-site", "same-site")
+        .json(&json!({}))
+        .send()
+        .await?;
+    assert_eq!(cross_origin_cookie_post.status(), StatusCode::UNAUTHORIZED);
+
+    let originless_cookie_post = client
+        .post(format!("http://{addr}/v1/threads"))
+        .header(header::COOKIE, cookie_pair)
+        .json(&json!({}))
+        .send()
+        .await?;
+    assert_eq!(originless_cookie_post.status(), StatusCode::UNAUTHORIZED);
+
+    let bearer_post = client
+        .post(format!("http://{addr}/v1/threads"))
+        .bearer_auth(&token)
+        .header(header::ORIGIN, "http://127.0.0.1:3000")
+        .json(&json!({}))
+        .send()
+        .await?;
+    assert_eq!(bearer_post.status(), StatusCode::CREATED);
+
+    let reused = client
+        .get(format!("http://{addr}/__codewhale/bootstrap/{nonce}"))
+        .send()
+        .await?;
+    assert_eq!(reused.status(), StatusCode::UNAUTHORIZED);
+
+    let mobile = client.get(format!("http://{addr}/mobile")).send().await?;
+    assert_eq!(mobile.status(), StatusCode::NOT_FOUND);
+
+    handle.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn web_assets_are_absent_outside_web_mode() -> Result<()> {
+    let Some((addr, _runtime_threads, handle)) = spawn_test_server().await? else {
+        return Ok(());
+    };
+    let client = crate::tls::reqwest_client();
+    for path in ["/", "/assets/codewhale-web.css", "/assets/codewhale-web.js"] {
+        let response = client.get(format!("http://{addr}{path}")).send().await?;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "path={path}");
+    }
     handle.abort();
     Ok(())
 }
@@ -5044,7 +5206,7 @@ async fn set_config_response_contains_all_expected_fields() -> Result<()> {
 }
 
 #[tokio::test]
-async fn cors_layer_advertises_only_supported_request_headers() -> Result<()> {
+async fn cors_layer_advertises_exact_supported_headers_and_never_an_extra() -> Result<()> {
     let layer = cors_layer(&[]);
     let router: Router = Router::new()
         .route("/probe", get(|| async { "ok" }))
@@ -5062,19 +5224,26 @@ async fn cors_layer_advertises_only_supported_request_headers() -> Result<()> {
 
     let client = crate::tls::reqwest_client();
 
-    let resp = client
+    let allowed = client
         .request(reqwest::Method::OPTIONS, format!("http://{addr}/probe"))
         .header("Origin", "http://localhost:1420")
-        .header("Access-Control-Request-Method", "GET")
+        .header("Access-Control-Request-Method", "POST")
         .header(
             "Access-Control-Request-Headers",
-            "authorization, content-type, accept, x-codewhale-runtime-token, x-deepseek-runtime-token, x-malicious-header",
+            "authorization, content-type, accept, x-codewhale-runtime-token, x-deepseek-runtime-token",
         )
         .send()
         .await?;
 
-    assert!(resp.status().is_success());
-    let allow_headers = resp
+    assert!(allowed.status().is_success());
+    assert_eq!(
+        allowed
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|value| value.to_str().ok()),
+        Some("http://localhost:1420")
+    );
+    let allow_headers = allowed
         .headers()
         .get("access-control-allow-headers")
         .and_then(|v| v.to_str().ok())
@@ -5096,6 +5265,27 @@ async fn cors_layer_advertises_only_supported_request_headers() -> Result<()> {
     .collect::<std::collections::BTreeSet<_>>();
 
     assert_eq!(advertised, expected);
+
+    let unapproved = client
+        .request(reqwest::Method::OPTIONS, format!("http://{addr}/probe"))
+        .header("Origin", "http://localhost:1420")
+        .header("Access-Control-Request-Method", "POST")
+        .header(
+            "Access-Control-Request-Headers",
+            "authorization, x-malicious-header",
+        )
+        .send()
+        .await?;
+    let unapproved_headers = unapproved
+        .headers()
+        .get("access-control-allow-headers")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert!(
+        !unapproved_headers.contains("x-malicious-header"),
+        "an unapproved request header must never be advertised to the browser"
+    );
 
     handle.abort();
     Ok(())

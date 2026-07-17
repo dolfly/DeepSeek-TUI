@@ -73,6 +73,7 @@ use codewhale_protocol::fleet::{
 
 mod auth;
 mod sessions;
+mod web;
 mod workspace;
 #[cfg(test)]
 use self::auth::{ResolvedRuntimeAuth, token_from_cookie_header};
@@ -111,6 +112,7 @@ pub struct RuntimeApiState {
     bind_host: String,
     bind_port: u16,
     mobile_enabled: bool,
+    web: Option<web::RuntimeWebState>,
     /// Executable used by Runtime API-owned Fleet manager loops. Stored on
     /// state so tests and embedded callers can provide a hermetic worker.
     fleet_codewhale_binary: String,
@@ -142,6 +144,10 @@ pub struct RuntimeApiOptions {
     pub insecure_no_auth: bool,
     /// Enables the built-in mobile control page at `/mobile`.
     pub mobile: bool,
+    /// Enables the embedded local browser client and opens it after binding.
+    /// Web mode is always loopback-only and uses a one-time bootstrap cookie
+    /// exchange rather than exposing the Runtime token to the browser URL.
+    pub web: bool,
     /// Show a QR code for the mobile URL in the terminal.
     pub show_qr: bool,
     /// Original `--config` path used to load the initial config. When
@@ -162,6 +168,7 @@ impl Default for RuntimeApiOptions {
             auth_token: None,
             insecure_no_auth: false,
             mobile: false,
+            web: false,
             show_qr: false,
             config_path: None,
             config_profile: None,
@@ -418,6 +425,12 @@ pub async fn run_http_server(
     if options.port == 0 {
         bail!("Port must be > 0");
     }
+    if options.web && options.host != "127.0.0.1" {
+        bail!("Codewhale web is loopback-only and must bind to 127.0.0.1");
+    }
+    if options.web && options.insecure_no_auth {
+        bail!("Codewhale web requires Runtime authentication; remove --insecure");
+    }
 
     let task_cfg = TaskManagerConfig::from_runtime(
         &config,
@@ -458,6 +471,15 @@ pub async fn run_http_server(
     );
     let runtime_token = resolved_auth.token.clone();
     let auth_enabled = runtime_token.is_some();
+    let (web, web_bootstrap) = if options.web {
+        runtime_token
+            .as_ref()
+            .context("Codewhale web requires a Runtime authentication token")?;
+        let (web, bootstrap) = web::RuntimeWebState::new();
+        (Some(web), Some(bootstrap))
+    } else {
+        (None, None)
+    };
     let skill_state = SkillStateStore::load_default().unwrap_or_else(|err| {
         tracing::warn!(
             "Failed to load skills_state.toml ({}); treating all skills as enabled",
@@ -483,6 +505,7 @@ pub async fn run_http_server(
         bind_host: options.host.clone(),
         bind_port: options.port,
         mobile_enabled: options.mobile,
+        web,
         fleet_codewhale_binary: configured_codewhale_binary(),
         mcp_pool: Arc::new(Mutex::new(None)),
     };
@@ -495,12 +518,30 @@ pub async fn run_http_server(
         .await
         .with_context(|| format!("Failed to bind {addr}"))?;
 
-    println!("Runtime API listening on http://{addr}");
+    let bound_addr = listener
+        .local_addr()
+        .context("Failed to read Runtime API listener address")?;
+    println!("Runtime API listening on http://{bound_addr}");
     for line in runtime_auth_status_lines(&resolved_auth) {
         println!("{line}");
     }
     if options.mobile {
-        print_mobile_urls(addr, auth_enabled, resolved_auth.generated, options.show_qr);
+        print_mobile_urls(
+            bound_addr,
+            auth_enabled,
+            resolved_auth.generated,
+            options.show_qr,
+        );
+    }
+    if let Some(bootstrap) = web_bootstrap {
+        println!("Codewhale web enabled at http://{bound_addr}/");
+        let bootstrap_url = web::bootstrap_url(bound_addr, &bootstrap);
+        if let Err(error) = crate::utils::open_url(&bootstrap_url) {
+            scheduler_cancel.cancel();
+            scheduler_handle.abort();
+            return Err(error)
+                .context("Failed to open the Codewhale web client in the default browser");
+        }
     }
     let is_loopback = options.host == "127.0.0.1" || options.host == "::1";
     if is_loopback {
@@ -522,9 +563,12 @@ pub async fn run_http_server(
             auth = auth_enabled,
         );
     }
-    let serve_result = axum::serve(listener, app)
-        .await
-        .map_err(|e| anyhow!("Runtime API server error: {e}"));
+    let serve_result = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .map_err(|e| anyhow!("Runtime API server error: {e}"));
     scheduler_cancel.cancel();
     scheduler_handle.abort();
     serve_result
@@ -623,6 +667,13 @@ pub fn build_router(state: RuntimeApiState) -> Router {
         ));
 
     Router::new()
+        .route("/", get(web::web_page))
+        .route("/assets/codewhale-web.css", get(web::web_styles))
+        .route("/assets/codewhale-web.js", get(web::web_script))
+        .route(
+            "/__codewhale/bootstrap/{nonce}",
+            get(web::exchange_bootstrap),
+        )
         .route("/health", get(health))
         .route("/mobile", get(mobile_page))
         .route("/mobile/", get(mobile_page))
