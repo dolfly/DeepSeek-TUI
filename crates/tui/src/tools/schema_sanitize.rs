@@ -835,11 +835,23 @@ mod tests {
                         },
                         "required": ["path", "content"]
                     }
+                },
+                "changes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "content": {"type": "string"}
+                        },
+                        "required": ["path", "content"]
+                    }
                 }
             },
             "oneOf": [
                 {"required": ["patch"]},
-                {"required": ["replace"]}
+                {"required": ["replace"]},
+                {"required": ["changes"]}
             ]
         });
 
@@ -853,9 +865,12 @@ mod tests {
         assert!(schema.get("not").is_none());
         assert!(schema["properties"].get("patch").is_some());
         assert!(schema["properties"].get("replace").is_some());
+        assert!(schema["properties"].get("changes").is_some());
         assert_eq!(
             note.as_deref(),
-            Some("Exactly one of these parameter groups must be provided: `patch` | `replace`.")
+            Some(
+                "Exactly one of these parameter groups must be provided: `changes` | `patch` | `replace`."
+            )
         );
     }
 

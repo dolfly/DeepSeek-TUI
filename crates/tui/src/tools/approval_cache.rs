@@ -37,6 +37,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::command_safety::classify_command;
+use crate::tools::apply_patch::{NormalizedApplyPatchInput, normalize_apply_patch_input};
 
 /// The fingerprint of a tool call — stable enough to match repeated
 /// calls but specific enough to avoid privilege confusion.
@@ -123,18 +124,22 @@ fn hash_patch_paths(input: &serde_json::Value) -> String {
 
     let mut paths: Vec<&str> = Vec::new();
 
-    if let Some(changes) = input.get("replace").and_then(|v| v.as_array()) {
-        for change in changes {
-            if let Some(path) = change.get("path").and_then(|v| v.as_str()) {
-                paths.push(path);
+    match normalize_apply_patch_input(input) {
+        Ok(NormalizedApplyPatchInput::Replacement { entries, .. }) => {
+            for change in entries {
+                if let Some(path) = change.get("path").and_then(|v| v.as_str()) {
+                    paths.push(path);
+                }
             }
         }
-    } else if let Some(patch_text) = input.get("patch").and_then(|v| v.as_str()) {
-        for line in patch_text.lines() {
-            if let Some(rest) = line.strip_prefix("+++ b/") {
-                paths.push(rest.trim());
+        Ok(NormalizedApplyPatchInput::Patch(patch_text)) => {
+            for line in patch_text.lines() {
+                if let Some(rest) = line.strip_prefix("+++ b/") {
+                    paths.push(rest.trim());
+                }
             }
         }
+        Err(_) => {}
     }
 
     paths.sort();
@@ -301,6 +306,20 @@ mod tests {
             key_a, key_b,
             "approving a patch family must cover later edits to the same path"
         );
+    }
+
+    #[test]
+    fn grouping_key_treats_replace_and_legacy_changes_as_the_same_path_set() {
+        let canonical = build_approval_grouping_key(
+            "apply_patch",
+            &json!({"replace": [{"path": "a.rs", "content": "new"}]}),
+        );
+        let legacy = build_approval_grouping_key(
+            "apply_patch",
+            &json!({"changes": [{"path": "a.rs", "content": "new"}]}),
+        );
+
+        assert_eq!(canonical, legacy);
     }
 
     #[test]
