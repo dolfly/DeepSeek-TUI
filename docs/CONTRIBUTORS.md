@@ -53,6 +53,8 @@ notes, and relevant issue/PR comments.
 - **[Luis Mateus Vargas / luismateusvargas](https://github.com/luismateusvargas)**
   — the Windows hook-process leak reproduction, process-tree analysis, and EOF
   fix direction (#4489)
+- **[redjade75723](https://github.com/redjade75723)** — the persistent Windows
+  PTY failure report that exposed lossy high-bit exit-status handling (#4100)
 
 </details>
 
