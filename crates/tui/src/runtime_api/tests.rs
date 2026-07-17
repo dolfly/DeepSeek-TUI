@@ -5042,3 +5042,50 @@ async fn set_config_response_contains_all_expected_fields() -> Result<()> {
     handle.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn cors_layer_restricts_headers() -> Result<()> {
+    let layer = cors_layer(&[]);
+    let router: Router = Router::new()
+        .route("/probe", get(|| async { "ok" }))
+        .layer(layer);
+
+    let listener = match TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return Ok(()),
+        Err(err) => return Err(err.into()),
+    };
+    let addr = listener.local_addr()?;
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+
+    let client = crate::tls::reqwest_client();
+
+    let resp = client
+        .request(reqwest::Method::OPTIONS, format!("http://{addr}/probe"))
+        .header("Origin", "http://localhost:1420")
+        .header("Access-Control-Request-Method", "GET")
+        .header(
+            "Access-Control-Request-Headers",
+            "authorization, content-type, accept, x-codewhale-runtime-token, x-deepseek-runtime-token, x-malicious-header",
+        )
+        .send()
+        .await?;
+
+    let allow_headers = resp
+        .headers()
+        .get("access-control-allow-headers")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    assert!(allow_headers.contains("authorization"));
+    assert!(allow_headers.contains("content-type"));
+    assert!(allow_headers.contains("accept"));
+    assert!(allow_headers.contains("x-codewhale-runtime-token"));
+    assert!(allow_headers.contains("x-deepseek-runtime-token"));
+    assert!(!allow_headers.contains("x-malicious-header"));
+
+    handle.abort();
+    Ok(())
+}
