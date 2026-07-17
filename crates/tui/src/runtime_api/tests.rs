@@ -616,6 +616,7 @@ struct TestServerOverrides {
     fleet_codewhale_binary: Option<String>,
     config_path: Option<PathBuf>,
     config_profile: Option<String>,
+    web: Option<web::RuntimeWebState>,
 }
 
 async fn spawn_test_server_with_root_token_mobile_workspace_and_subagents(
@@ -702,6 +703,12 @@ async fn spawn_test_server_with_root_token_mobile_workspace_and_overrides(
     let sub_agent_manager = overrides
         .sub_agent_manager
         .unwrap_or_else(|| runtime_api_sub_agent_manager(&workspace, 2));
+    let listener = match TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    let addr = listener.local_addr()?;
     let state = RuntimeApiState {
         config: Arc::new(parking_lot::RwLock::new(config)),
         workspace,
@@ -720,21 +727,20 @@ async fn spawn_test_server_with_root_token_mobile_workspace_and_overrides(
         )),
         auth_required,
         bind_host: "127.0.0.1".to_string(),
-        bind_port: 0,
+        bind_port: addr.port(),
         mobile_enabled,
+        web: overrides.web,
         fleet_codewhale_binary: overrides
             .fleet_codewhale_binary
             .unwrap_or_else(configured_codewhale_binary),
     };
     let app = build_router(state);
-    let listener = match TcpListener::bind("127.0.0.1:0").await {
-        Ok(listener) => listener,
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return Ok(None),
-        Err(err) => return Err(err.into()),
-    };
-    let addr = listener.local_addr()?;
     let handle = tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
     });
     Ok(Some((addr, runtime_threads, handle)))
 }

@@ -1029,6 +1029,9 @@ struct ServeArgs {
     /// Start runtime HTTP/SSE API server with the built-in mobile control page
     #[arg(long)]
     mobile: bool,
+    /// Start the embedded loopback-only browser client and open it
+    #[arg(long)]
+    web: bool,
     /// Show a QR code for the mobile URL in the terminal (requires --mobile)
     #[arg(long, requires = "mobile")]
     qr: bool,
@@ -1084,17 +1087,26 @@ fn resolve_serve_bind_host(mobile: bool, host: Option<String>) -> ServeBindHost 
     }
 }
 
-fn validate_serve_mode_selection(mcp: bool, http: bool, mobile: bool, acp: bool) -> Result<bool> {
+fn validate_serve_mode_selection(
+    mcp: bool,
+    http: bool,
+    mobile: bool,
+    web: bool,
+    acp: bool,
+) -> Result<bool> {
     if http && mobile {
         bail!("--http and --mobile are mutually exclusive; choose one");
     }
-    let http_selected = http || mobile;
+    if web && (http || mobile) {
+        bail!("--web is mutually exclusive with --http and --mobile");
+    }
+    let http_selected = http || mobile || web;
     let selected_modes = [mcp, http_selected, acp]
         .into_iter()
         .filter(|selected| *selected)
         .count();
     if selected_modes != 1 {
-        bail!("Choose exactly one server mode: --mcp, --http/--mobile, or --acp");
+        bail!("Choose exactly one server mode: --mcp, --http/--mobile/--web, or --acp");
     }
     Ok(http_selected)
 }
@@ -1582,8 +1594,13 @@ async fn run_async_main() -> Result<()> {
                 let workspace = cli.workspace.clone().unwrap_or_else(|| {
                     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
                 });
-                let http_selected =
-                    validate_serve_mode_selection(args.mcp, args.http, args.mobile, args.acp)?;
+                let http_selected = validate_serve_mode_selection(
+                    args.mcp,
+                    args.http,
+                    args.mobile,
+                    args.web,
+                    args.acp,
+                )?;
                 if args.mcp {
                     tokio::task::block_in_place(|| mcp_server::run_mcp_server(workspace))
                 } else if http_selected {
@@ -1591,6 +1608,9 @@ async fn run_async_main() -> Result<()> {
                         load_config_from_cli_with_effective_profile(&cli)?;
                     let cors_origins = resolve_cors_origins(&config, &args.cors_origin);
                     let bind_host = resolve_serve_bind_host(args.mobile, args.host);
+                    if args.web && bind_host.host != "127.0.0.1" {
+                        bail!("Codewhale web is loopback-only and must bind to 127.0.0.1");
+                    }
                     if bind_host.mobile_rebound_to_lan {
                         println!(
                             "WARNING: --mobile is binding to 0.0.0.0 so LAN devices can reach the mobile control page. Use --host 127.0.0.1 to keep mobile loopback-only."
@@ -1607,6 +1627,7 @@ async fn run_async_main() -> Result<()> {
                             auth_token: args.auth_token,
                             insecure_no_auth: args.insecure_no_auth,
                             mobile: args.mobile,
+                            web: args.web,
                             show_qr: args.qr,
                             config_path: cli.config.clone(),
                             config_profile,
@@ -9422,10 +9443,24 @@ mod serve_bind_host_tests {
 
     #[test]
     fn http_and_mobile_are_mutually_exclusive() {
-        let err = validate_serve_mode_selection(false, true, true, false).unwrap_err();
+        let err = validate_serve_mode_selection(false, true, true, false, false).unwrap_err();
         assert!(
             err.to_string()
                 .contains("--http and --mobile are mutually exclusive")
+        );
+    }
+
+    #[test]
+    fn web_is_a_distinct_loopback_runtime_mode() {
+        assert!(validate_serve_mode_selection(false, false, false, true, false).unwrap());
+        let err = validate_serve_mode_selection(false, true, false, true, false).unwrap_err();
+        assert!(err.to_string().contains("--web is mutually exclusive"));
+        assert_eq!(
+            resolve_serve_bind_host(false, None),
+            ServeBindHost {
+                host: "127.0.0.1".to_string(),
+                mobile_rebound_to_lan: false,
+            }
         );
     }
 }
