@@ -370,6 +370,13 @@ fn staging_is_owner_only_and_uses_the_reviewed_executable_shape() {
     registry.enable("demo").unwrap();
     let staged = registry.get("demo").unwrap().staged_root.as_ref().unwrap();
     assert_ne!(staged, &plugin);
+    let state_parent = config.state_path.parent().unwrap().canonicalize().unwrap();
+    let relative_stage = staged.strip_prefix(state_parent).unwrap();
+    assert!(
+        relative_stage.starts_with(Path::new(".runtime/v2")),
+        "runtime authority must use the v2 staging domain: {}",
+        staged.display()
+    );
     assert_eq!(
         fs::metadata(staged).unwrap().permissions().mode() & 0o777,
         0o500
@@ -465,7 +472,7 @@ fn discovery_rejects_an_insecure_state_parent_without_mutating_it() {
 
 #[cfg(unix)]
 #[test]
-fn trust_hardens_an_existing_owned_state_parent() {
+fn trust_rejects_an_existing_group_accessible_state_parent_without_repairing_it() {
     use std::os::unix::fs::PermissionsExt as _;
 
     let tmp = tempfile::tempdir().unwrap();
@@ -475,13 +482,47 @@ fn trust_hardens_an_existing_owned_state_parent() {
     fs::create_dir_all(state_parent).unwrap();
     fs::set_permissions(state_parent, fs::Permissions::from_mode(0o777)).unwrap();
     let mut registry = discover_with_config(&config);
-    assert!(registry.state_error().is_none());
+    assert!(registry.state_error().is_some());
 
-    registry.trust("demo").unwrap();
+    assert!(registry.trust("demo").is_err());
 
     assert_eq!(
         fs::metadata(state_parent).unwrap().permissions().mode() & 0o777,
-        0o700
+        0o777,
+        "trust must not silently repair a pre-existing unsafe authority directory"
+    );
+    assert!(!config.state_path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn discovery_rejects_a_symlinked_state_parent_without_touching_its_target() {
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let config = config(tmp.path());
+    write_plugin(&config, "");
+    let target = tmp.path().join("state-target");
+    fs::create_dir(&target).unwrap();
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
+    let state_body = b"{\"schema_version\":1,\"plugins\":{}}\n";
+    fs::write(target.join("plugin-state.json"), state_body).unwrap();
+    symlink(&target, config.state_path.parent().unwrap()).unwrap();
+
+    let mut registry = discover_with_config(&config);
+
+    assert!(registry.state_error().is_some());
+    assert!(registry.trust("demo").is_err());
+    assert_eq!(
+        fs::read(target.join("plugin-state.json")).unwrap(),
+        state_body
+    );
+    assert!(
+        fs::symlink_metadata(config.state_path.parent().unwrap())
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "discovery and trust must leave the state-parent link in place"
     );
 }
 
@@ -536,7 +577,7 @@ fn discovery_rejects_linked_state_and_lock_without_touching_targets() {
 #[cfg(unix)]
 #[test]
 fn staging_rejects_root_swaps_symlinked_runtime_parents_and_hardlinks() {
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
 
     let tmp = tempfile::tempdir().unwrap();
     let config = config(tmp.path());
@@ -558,6 +599,11 @@ fn staging_rejects_root_swaps_symlinked_runtime_parents_and_hardlinks() {
     fs::rename(&original, &plugin).unwrap();
     let mut parent_swap = discover_with_config(&config);
     fs::create_dir_all(config.state_path.parent().unwrap()).unwrap();
+    fs::set_permissions(
+        config.state_path.parent().unwrap(),
+        fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
     let runtime_root = config.state_path.parent().unwrap().join(".runtime");
     if runtime_root.exists() {
         fs::remove_dir_all(&runtime_root).unwrap();
