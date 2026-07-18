@@ -15,7 +15,7 @@ fn modal_block(title: &str) -> Block<'static> {
     Block::default()
         .title(Line::from(vec![Span::styled(
             title.to_string(),
-            Style::default().fg(palette::WHALE_ACCENT_PRIMARY).bold(),
+            Style::default().fg(palette::WHALE_HUMAN).bold(),
         )]))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(palette::BORDER_COLOR))

@@ -12,12 +12,14 @@ use super::themes::{
 use super::tokens::{
     ACCENT_REASONING_LIVE, DIFF_ADDED, DIFF_ADDED_BG, GRAYSCALE_BORDER, GRAYSCALE_ELEVATED,
     GRAYSCALE_PANEL, GRAYSCALE_REASONING, GRAYSCALE_SURFACE, GRAYSCALE_TEXT_BODY,
-    GRAYSCALE_TEXT_HINT, GRAYSCALE_TEXT_SOFT, LIGHT_BORDER, LIGHT_ELEVATED, LIGHT_PANEL,
-    LIGHT_REASONING, LIGHT_SURFACE, LIGHT_TEXT_BODY, LIGHT_TEXT_BODY_RGB, LIGHT_TEXT_HINT,
-    SOLARIZED_PANEL, SOLARIZED_SURFACE, SOLARIZED_TEXT_BODY, SOLARIZED_TEXT_HINT,
-    SURFACE_REASONING, SURFACE_REASONING_TINT, TEXT_BODY, TEXT_HINT, TEXT_REASONING,
-    TEXT_TOOL_OUTPUT, WHALE_BG, WHALE_ERROR, WHALE_INFO, WHALE_PANEL, WHALE_REASONING_TEXT_RGB,
-    WHALE_REASONING_TINT_RGB, WHALE_TEXT_BODY_RGB,
+    GRAYSCALE_TEXT_HINT, GRAYSCALE_TEXT_SOFT, LIGHT_ACTION, LIGHT_BORDER, LIGHT_DANGER,
+    LIGHT_ELEVATED, LIGHT_HUMAN, LIGHT_LIVE, LIGHT_PANEL, LIGHT_REASONING, LIGHT_SUCCESS_FG,
+    LIGHT_SURFACE, LIGHT_TEXT_BODY, LIGHT_TEXT_BODY_RGB, LIGHT_TEXT_HINT, LIGHT_WARNING,
+    SOLARIZED_PANEL, SOLARIZED_SURFACE, SOLARIZED_TEXT_BODY, SOLARIZED_TEXT_HINT, STATUS_ERROR,
+    STATUS_WARNING, SURFACE_REASONING, SURFACE_REASONING_TINT, TEXT_BODY, TEXT_HINT,
+    TEXT_REASONING, TEXT_TOOL_OUTPUT, WHALE_ACTION, WHALE_BG, WHALE_ERROR, WHALE_HUMAN, WHALE_INFO,
+    WHALE_LIVE, WHALE_PANEL, WHALE_REASONING_TEXT_RGB, WHALE_REASONING_TINT_RGB,
+    WHALE_TEXT_BODY_RGB,
 };
 use ratatui::style::Color;
 
@@ -145,10 +147,10 @@ fn terminal_theme_resets_surfaces_and_remaps_direct_palette_constants() {
 
 #[test]
 fn light_palette_has_quiet_layer_separation() {
-    assert_eq!(LIGHT_SURFACE, Color::Rgb(246, 248, 251));
-    assert_eq!(LIGHT_PANEL, Color::Rgb(236, 242, 248));
-    assert_eq!(LIGHT_ELEVATED, Color::Rgb(219, 229, 240));
-    assert_eq!(LIGHT_BORDER, Color::Rgb(139, 161, 184));
+    assert_eq!(LIGHT_SURFACE, Color::Rgb(244, 247, 251));
+    assert_eq!(LIGHT_PANEL, Color::Rgb(255, 253, 248));
+    assert_eq!(LIGHT_ELEVATED, Color::Rgb(232, 238, 248));
+    assert_eq!(LIGHT_BORDER, Color::Rgb(169, 184, 207));
     assert_ne!(LIGHT_SURFACE, LIGHT_PANEL);
     assert_ne!(LIGHT_PANEL, LIGHT_ELEVATED);
 }
@@ -240,6 +242,27 @@ fn light_palette_maps_dark_surfaces_and_text() {
         adapt_fg_for_palette_mode(TEXT_HINT, LIGHT_SURFACE, PaletteMode::Light),
         LIGHT_TEXT_HINT
     );
+    assert_eq!(
+        adapt_fg_for_palette_mode(WHALE_ACTION, LIGHT_SURFACE, PaletteMode::Light),
+        LIGHT_ACTION
+    );
+    assert_eq!(
+        adapt_fg_for_palette_mode(WHALE_LIVE, LIGHT_SURFACE, PaletteMode::Light),
+        LIGHT_LIVE
+    );
+    assert_eq!(
+        adapt_fg_for_palette_mode(WHALE_HUMAN, LIGHT_SURFACE, PaletteMode::Light),
+        LIGHT_HUMAN
+    );
+    assert_eq!(
+        adapt_fg_for_palette_mode(STATUS_WARNING, LIGHT_SURFACE, PaletteMode::Light),
+        LIGHT_WARNING
+    );
+    assert_eq!(
+        adapt_fg_for_palette_mode(STATUS_ERROR, LIGHT_SURFACE, PaletteMode::Light),
+        LIGHT_DANGER
+    );
+    assert_ne!(LIGHT_LIVE, LIGHT_SUCCESS_FG);
 }
 
 #[test]
@@ -442,13 +465,14 @@ fn pulse_passes_named_colors_unchanged() {
 
 #[test]
 fn nearest_ansi16_routes_known_brand_colors() {
-    // v0.8.45: accent primary is Signal Gold (#F6C453), secondary is Seafoam.
+    // Blue Stage keeps action, live, human, and danger distinct where ANSI-16 allows it.
+    assert_eq!(nearest_ansi16(106, 174, 242), Color::LightBlue); // Blue Devil action
     assert_eq!(nearest_ansi16(246, 196, 83), Color::LightYellow); // Signal Gold
     assert_eq!(nearest_ansi16(79, 209, 197), Color::LightCyan); // Seafoam
     assert_eq!(nearest_ansi16(42, 74, 127), Color::Blue); // Border
     assert_eq!(nearest_ansi16(54, 187, 212), Color::LightCyan); // Aqua
-    assert_eq!(nearest_ansi16(255, 92, 122), Color::LightRed); // Rose Red
-    assert_eq!(nearest_ansi16(13, 21, 37), Color::Black); // Deep Navy
+    assert_eq!(nearest_ansi16(255, 134, 178), Color::LightRed); // Rose danger
+    assert_eq!(nearest_ansi16(3, 7, 13), Color::Black); // Stage Black
 }
 
 #[test]

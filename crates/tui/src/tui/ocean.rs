@@ -178,6 +178,30 @@ impl OceanRamp {
             return None;
         }
 
+        // The canonical Whale pair gets the authored Blue Stage water column.
+        // Match both name and surface so a user-supplied `background_color`
+        // remains the source of truth and still receives the generic ramp.
+        if theme.name == crate::palette::UI_THEME.name
+            && theme.surface_bg == crate::palette::UI_THEME.surface_bg
+        {
+            return Some(Self {
+                surface: Color::Rgb(0x0e, 0x17, 0x29),
+                middle: Color::Rgb(0x08, 0x11, 0x1c),
+                deep: Color::Rgb(0x03, 0x07, 0x0d),
+                ambient: Color::Rgb(0x26, 0x48, 0x66),
+            });
+        }
+        if theme.name == crate::palette::LIGHT_UI_THEME.name
+            && theme.surface_bg == crate::palette::LIGHT_UI_THEME.surface_bg
+        {
+            return Some(Self {
+                surface: Color::Rgb(0xff, 0xfd, 0xf8),
+                middle: Color::Rgb(0xf4, 0xf7, 0xfb),
+                deep: Color::Rgb(0xdb, 0xe4, 0xf2),
+                ambient: Color::Rgb(0x9a, 0xb8, 0xe0),
+            });
+        }
+
         let base = rgb(theme.surface_bg)?;
         let seafoam = rgb(theme.accent_secondary).unwrap_or((79, 209, 197));
 
@@ -322,6 +346,9 @@ mod tests {
     #[test]
     fn whale_ramp_is_perceptibly_deep_not_merely_non_equal() {
         let ramp = OceanRamp::for_theme(&crate::palette::UI_THEME).expect("RGB theme");
+        assert_eq!(ramp.surface, Color::Rgb(0x0e, 0x17, 0x29));
+        assert_eq!(ramp.middle, Color::Rgb(0x08, 0x11, 0x1c));
+        assert_eq!(ramp.deep, Color::Rgb(0x03, 0x07, 0x0d));
         assert!(
             distance(ramp.surface, ramp.deep) >= 32,
             "the selected underwater treatment must read at a glance"
@@ -332,8 +359,21 @@ mod tests {
     #[test]
     fn light_theme_stays_light_enough_for_light_theme_text() {
         let ramp = OceanRamp::for_theme(&crate::palette::LIGHT_UI_THEME).expect("RGB theme");
+        assert_eq!(ramp.surface, Color::Rgb(0xff, 0xfd, 0xf8));
+        assert_eq!(ramp.middle, Color::Rgb(0xf4, 0xf7, 0xfb));
+        assert_eq!(ramp.deep, Color::Rgb(0xdb, 0xe4, 0xf2));
         let (r, g, b) = rgb(ramp.deep).expect("RGB color");
         assert!(u16::from(r) + u16::from(g) + u16::from(b) > 420);
+    }
+
+    #[test]
+    fn whale_custom_background_uses_the_configured_surface() {
+        let custom = Color::Rgb(0x12, 0x1a, 0x2d);
+        let theme = crate::palette::UI_THEME.with_background_color(custom);
+        let ramp = OceanRamp::for_theme(&theme).expect("custom backgrounds retain ombre");
+
+        assert_ne!(ramp.surface, Color::Rgb(0x0e, 0x17, 0x29));
+        assert_ne!(ramp.surface, ramp.deep);
     }
 
     #[test]

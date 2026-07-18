@@ -1112,12 +1112,18 @@ You can inspect or update these from the TUI with `/settings` and `/config`
 
 Common settings keys:
 
-- `theme` (`system`, `dark`, `light`, `grayscale`, `catppuccin-mocha`,
-  `tokyo-night`, `dracula`, `gruvbox-dark`; default `system`): `system`
-  follows terminal background detection, `dark`/`light` use the DeepSeek
-  palettes, `grayscale` is the low-opinion black/white theme, and the named
-  community presets apply across the TUI. Aliases such as `whale`, `mono`,
-  `black-white`, `tokyonight`, and `gruvbox` are accepted.
+- `theme` (`system`, `terminal`, `dark`, `light`, `grayscale`,
+  `catppuccin-mocha`, `tokyo-night`, `dracula`, `gruvbox-dark`, `claude`,
+  `matrix`, `solarized-light`; default `system`): `system` follows terminal
+  background detection, `dark`/`light` use the Blue Stage Whale pair,
+  `terminal` inherits the host terminal, `grayscale` is the low-opinion
+  black/white theme, and the named community presets apply across the TUI.
+  Aliases such as `whale`, `mono`, `black-white`, `tokyonight`, and `gruvbox`
+  are accepted. In Whale, Blue Devil blue owns action/focus, seafoam owns live
+  work, Signal Gold owns human decisions and the whale, coral owns warnings,
+  rose owns danger, violet owns Operate, and green remains completed/verified.
+  Text labels, markers, and motion policy carry the same states when color is
+  unavailable; color is never the only cue.
 - `auto_compact` (on/off, model-aware default on for known context windows
   unless explicitly configured)
 - `auto_compact_threshold_percent` (10-100, default `80`): pre-send

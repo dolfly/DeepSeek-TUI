@@ -87,23 +87,34 @@ fn verify_status_success_uses_success_token() {
 }
 
 #[test]
-#[allow(deprecated)]
-fn verify_brand_aliases_follow_whale_tokens() {
-    assert_eq!(palette::WHALE_ACCENT_PRIMARY_RGB, (246, 196, 83));
-    assert_eq!(palette::WHALE_INFO_RGB, (106, 174, 242));
-    assert_eq!(palette::WHALE_ERROR_RGB, (255, 92, 122));
-    assert_eq!(
-        color_to_rgb(palette::WHALE_ACCENT_PRIMARY),
-        palette::WHALE_ACCENT_PRIMARY_RGB
-    );
+fn whale_blue_stage_roles_are_pinned_and_non_colliding() {
+    assert_eq!(palette::WHALE_BG_RGB, (3, 7, 13));
+    assert_eq!(palette::WHALE_PANEL_RGB, (14, 23, 41));
+    assert_eq!(palette::WHALE_ELEVATED_RGB, (24, 39, 66));
+    assert_eq!(palette::WHALE_ACTION_RGB, (106, 174, 242));
+    assert_eq!(palette::WHALE_ACCENT_SECONDARY_RGB, (79, 209, 197));
+    assert_eq!(palette::WHALE_HUMAN_RGB, (246, 196, 83));
+    assert_eq!(palette::WHALE_WARNING_RGB, (255, 122, 89));
+    assert_eq!(palette::WHALE_ERROR_RGB, (255, 134, 178));
+    assert_eq!(palette::WHALE_MODE_OPERATE_RGB, (173, 136, 255));
 
-    assert_eq!(
-        palette::WHALE_ACCENT_PRIMARY_RGB,
-        palette::WHALE_ACCENT_PRIMARY_RGB
+    let ui = palette::UI_THEME;
+    assert_eq!(ui.accent_primary, palette::WHALE_ACTION);
+    assert_eq!(ui.info, palette::WHALE_ACTION);
+    assert_eq!(ui.status_working, palette::WHALE_LIVE);
+    assert_eq!(ui.accent_action, palette::WHALE_HUMAN);
+    assert_eq!(ui.warning, palette::STATUS_WARNING);
+    assert_eq!(ui.error_fg, palette::WHALE_ERROR);
+    assert_eq!(ui.mode_operate, palette::MODE_OPERATE);
+    assert_ne!(
+        ui.status_working, ui.success,
+        "live and done need separate ink"
     );
-    assert_eq!(palette::WHALE_ACCENT_PRIMARY, palette::WHALE_ACCENT_PRIMARY);
-    assert_eq!(palette::WHALE_INFO_RGB, palette::WHALE_INFO_RGB);
-    assert_eq!(palette::WHALE_ERROR_RGB, palette::WHALE_ERROR_RGB);
+    assert_ne!(ui.accent_action, ui.warning, "human asks are not warnings");
+    assert_ne!(
+        ui.warning, ui.error_fg,
+        "warning and danger must not collapse"
+    );
 }
 
 #[test]
@@ -152,6 +163,17 @@ fn contrast_guardrails_for_key_ui_pairs() {
         palette::SURFACE_ELEVATED,
         min_readable,
     );
+    for (label, foreground) in [
+        ("action", palette::UI_THEME.accent_primary),
+        ("live", palette::UI_THEME.status_working),
+        ("human", palette::UI_THEME.accent_action),
+        ("warning", palette::UI_THEME.warning),
+        ("danger", palette::UI_THEME.error_fg),
+        ("operate", palette::UI_THEME.mode_operate),
+        ("success", palette::UI_THEME.success),
+    ] {
+        assert_min_contrast(label, foreground, palette::SURFACE_ELEVATED, min_readable);
+    }
     assert_min_contrast(
         "LIGHT_TEXT_BODY on LIGHT_SURFACE",
         palette::LIGHT_TEXT_BODY,
@@ -170,4 +192,15 @@ fn contrast_guardrails_for_key_ui_pairs() {
         palette::LIGHT_SELECTION_BG,
         min_readable,
     );
+    for (label, foreground) in [
+        ("light action", palette::LIGHT_UI_THEME.accent_primary),
+        ("light live", palette::LIGHT_UI_THEME.status_working),
+        ("light human", palette::LIGHT_UI_THEME.accent_action),
+        ("light warning", palette::LIGHT_UI_THEME.warning),
+        ("light danger", palette::LIGHT_UI_THEME.error_fg),
+        ("light operate", palette::LIGHT_UI_THEME.mode_operate),
+        ("light success", palette::LIGHT_UI_THEME.success),
+    ] {
+        assert_min_contrast(label, foreground, palette::LIGHT_SURFACE, min_readable);
+    }
 }

@@ -904,7 +904,7 @@ pub fn empty_state_lines(app: &App, area: Rect) -> Vec<Line<'static>> {
                 row,
                 elapsed_ms,
                 animated,
-                app.ui_theme.accent_primary,
+                app.ui_theme.accent_action,
                 app.ui_theme.text_body,
                 app.ui_theme.text_body,
             )
@@ -1285,6 +1285,21 @@ mod tests {
         }
         assert_ne!(colors(&moving), colors(&parked));
         assert_eq!(colors(&frozen_a), colors(&frozen_b));
+    }
+
+    #[test]
+    fn idle_whale_uses_the_human_brand_role_not_focus_blue() {
+        let mut app = test_app();
+        app.low_motion = true;
+        let lines = empty_state_lines(&app, Rect::new(0, 0, 100, 30));
+        let colors = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .filter_map(|span| span.style.fg)
+            .collect::<Vec<_>>();
+
+        assert!(colors.contains(&app.ui_theme.accent_action));
+        assert_ne!(app.ui_theme.accent_action, app.ui_theme.accent_primary);
     }
 
     #[test]

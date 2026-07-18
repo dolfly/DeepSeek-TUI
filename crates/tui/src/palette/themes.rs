@@ -64,32 +64,20 @@ pub const UI_THEME: UiTheme = UiTheme {
     surface_bg: WHALE_BG,
     panel_bg: WHALE_PANEL,
     elevated_bg: SURFACE_ELEVATED,
-    composer_bg: WHALE_PANEL,
+    composer_bg: WHALE_COMPOSER,
     selection_bg: SELECTION_BG,
-    header_bg: WHALE_BG,
-    footer_bg: WHALE_BG,
+    header_bg: WHALE_CHROME,
+    footer_bg: WHALE_CHROME,
     text_dim: TEXT_DIM,
     text_hint: TEXT_HINT,
     text_muted: TEXT_MUTED,
     text_body: TEXT_BODY,
     text_soft: TEXT_SOFT,
     border: BORDER_COLOR,
-    accent_primary: Color::Rgb(
-        WHALE_ACCENT_PRIMARY_RGB.0,
-        WHALE_ACCENT_PRIMARY_RGB.1,
-        WHALE_ACCENT_PRIMARY_RGB.2,
-    ),
-    accent_secondary: Color::Rgb(
-        WHALE_ACCENT_SECONDARY_RGB.0,
-        WHALE_ACCENT_SECONDARY_RGB.1,
-        WHALE_ACCENT_SECONDARY_RGB.2,
-    ),
-    accent_action: Color::Rgb(
-        WHALE_ACCENT_ACTION_RGB.0,
-        WHALE_ACCENT_ACTION_RGB.1,
-        WHALE_ACCENT_ACTION_RGB.2,
-    ),
-    error_fg: Color::Rgb(WHALE_ERROR_RGB.0, WHALE_ERROR_RGB.1, WHALE_ERROR_RGB.2),
+    accent_primary: WHALE_ACTION,
+    accent_secondary: WHALE_LIVE,
+    accent_action: WHALE_HUMAN,
+    error_fg: WHALE_ERROR,
     error_hover: Color::Rgb(
         WHALE_ERROR_HOVER_RGB.0,
         WHALE_ERROR_HOVER_RGB.1,
@@ -110,39 +98,31 @@ pub const UI_THEME: UiTheme = UiTheme {
         WHALE_ERROR_TEXT_RGB.1,
         WHALE_ERROR_TEXT_RGB.2,
     ),
-    warning: Color::Rgb(
-        WHALE_WARNING_RGB.0,
-        WHALE_WARNING_RGB.1,
-        WHALE_WARNING_RGB.2,
-    ),
+    warning: STATUS_WARNING,
     success: Color::Rgb(
         WHALE_SUCCESS_RGB.0,
         WHALE_SUCCESS_RGB.1,
         WHALE_SUCCESS_RGB.2,
     ),
-    info: Color::Rgb(WHALE_INFO_RGB.0, WHALE_INFO_RGB.1, WHALE_INFO_RGB.2),
+    info: WHALE_ACTION,
     mode_agent: MODE_AGENT,
     mode_yolo: MODE_YOLO,
     mode_plan: MODE_PLAN,
     mode_operate: MODE_OPERATE,
     status_ready: TEXT_MUTED,
-    status_working: Color::Rgb(
-        WHALE_ACCENT_SECONDARY_RGB.0,
-        WHALE_ACCENT_SECONDARY_RGB.1,
-        WHALE_ACCENT_SECONDARY_RGB.2,
-    ),
+    status_working: WHALE_LIVE,
     status_warning: STATUS_WARNING,
     diff_added_fg: DIFF_ADDED,
-    diff_deleted_fg: Color::Rgb(WHALE_ERROR_RGB.0, WHALE_ERROR_RGB.1, WHALE_ERROR_RGB.2),
+    diff_deleted_fg: WHALE_ERROR,
     diff_added_bg: DIFF_ADDED_BG,
     diff_deleted_bg: DIFF_DELETED_BG,
-    tool_running: ACCENT_TOOL_LIVE,
+    tool_running: WHALE_LIVE,
     tool_success: Color::Rgb(
         WHALE_WORKING_GREEN_RGB.0,
         WHALE_WORKING_GREEN_RGB.1,
         WHALE_WORKING_GREEN_RGB.2,
     ),
-    tool_failed: ACCENT_TOOL_ISSUE,
+    tool_failed: WHALE_ERROR,
 };
 
 pub const LIGHT_UI_THEME: UiTheme = UiTheme {
@@ -161,35 +141,31 @@ pub const LIGHT_UI_THEME: UiTheme = UiTheme {
     text_body: LIGHT_TEXT_BODY,
     text_soft: LIGHT_TEXT_SOFT,
     border: LIGHT_BORDER,
-    accent_primary: Color::Rgb(53, 120, 229),   // blue
-    accent_secondary: Color::Rgb(79, 180, 160), // teal
-    accent_action: Color::Rgb(220, 90, 60),     // warm coral
-    error_fg: Color::Rgb(200, 40, 60),          // red
-    error_hover: Color::Rgb(220, 70, 85),
-    error_surface: Color::Rgb(254, 229, 229),
-    error_border: Color::Rgb(240, 120, 130),
-    error_text: Color::Rgb(120, 20, 30),
-    warning: Color::Rgb(180, 83, 9), // amber
-    success: Color::Rgb(
-        LIGHT_SUCCESS_FG_RGB.0,
-        LIGHT_SUCCESS_FG_RGB.1,
-        LIGHT_SUCCESS_FG_RGB.2,
-    ), // readable green foreground
-    info: Color::Rgb(53, 120, 229),  // blue
-    mode_agent: Color::Rgb(53, 120, 229), // blue
-    mode_yolo: Color::Rgb(200, 40, 60), // red
-    mode_plan: Color::Rgb(180, 83, 9), // amber
-    mode_operate: Color::Rgb(124, 58, 237), // violet
+    accent_primary: LIGHT_ACTION,
+    accent_secondary: LIGHT_LIVE,
+    accent_action: LIGHT_HUMAN,
+    error_fg: LIGHT_DANGER,
+    error_hover: Color::Rgb(201, 71, 120), // #C94778
+    error_surface: LIGHT_ERROR,
+    error_border: LIGHT_DANGER,
+    error_text: Color::Rgb(109, 22, 56), // #6D1638
+    warning: LIGHT_WARNING,
+    success: LIGHT_SUCCESS_FG,
+    info: LIGHT_ACTION,
+    mode_agent: LIGHT_ACTION,
+    mode_yolo: LIGHT_DANGER,
+    mode_plan: LIGHT_HUMAN,
+    mode_operate: LIGHT_OPERATE,
     status_ready: LIGHT_TEXT_MUTED,
-    status_working: Color::Rgb(79, 180, 160), // teal live work
-    status_warning: Color::Rgb(180, 83, 9),   // amber
-    diff_added_fg: Color::Rgb(22, 101, 52),   // green
-    diff_deleted_fg: Color::Rgb(200, 40, 60), // red
+    status_working: LIGHT_LIVE,
+    status_warning: LIGHT_WARNING,
+    diff_added_fg: Color::Rgb(22, 101, 52), // green
+    diff_deleted_fg: LIGHT_DANGER,
     diff_added_bg: Color::Rgb(223, 247, 231), // light green
-    diff_deleted_bg: Color::Rgb(254, 229, 229), // light red
-    tool_running: Color::Rgb(53, 120, 229),   // blue
-    tool_success: Color::Rgb(21, 128, 61),
-    tool_failed: Color::Rgb(200, 40, 60), // red
+    diff_deleted_bg: LIGHT_ERROR,
+    tool_running: LIGHT_LIVE,
+    tool_success: LIGHT_SUCCESS_FG,
+    tool_failed: LIGHT_DANGER,
 };
 
 pub const SOLARIZED_LIGHT_UI_THEME: UiTheme = UiTheme {
@@ -751,8 +727,8 @@ impl ThemeId {
         match self {
             Self::System => "Follow terminal background (COLORFGBG / macOS appearance)",
             Self::Terminal => "Inherit terminal colors fully (transparent surfaces, ANSI accents)",
-            Self::Whale => "Whale dark — deep navy & gold",
-            Self::WhaleLight => "DeepSeek light, paper-ish",
+            Self::Whale => "Blue Stage — Blue Devil focus, seafoam live, Signal Gold asks",
+            Self::WhaleLight => "Blue Stage light — ivory field, cobalt focus",
             Self::Grayscale => "Color-minimal high contrast",
             Self::CatppuccinMocha => "Soft pastels on warm dark",
             Self::TokyoNight => "Deep blue/violet night palette",
@@ -903,6 +879,49 @@ pub fn hex_rgb_string(color: Color) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blue_stage_refresh_keeps_theme_ids_and_default_compatibility() {
+        let names = SELECTABLE_THEMES
+            .iter()
+            .map(|theme| theme.name())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                "system",
+                "terminal",
+                "dark",
+                "light",
+                "grayscale",
+                "catppuccin-mocha",
+                "tokyo-night",
+                "dracula",
+                "gruvbox-dark",
+                "claude",
+                "matrix",
+                "solarized-light",
+            ]
+        );
+        assert_eq!(normalize_theme_name("default"), Some("system"));
+        assert_eq!(normalize_theme_name("whale"), Some("dark"));
+    }
+
+    #[test]
+    fn whale_pair_uses_blue_stage_semantic_grammar() {
+        assert_eq!(UI_THEME.accent_primary, WHALE_ACTION);
+        assert_eq!(UI_THEME.status_working, WHALE_LIVE);
+        assert_eq!(UI_THEME.accent_action, WHALE_HUMAN);
+        assert_eq!(UI_THEME.warning, STATUS_WARNING);
+        assert_eq!(UI_THEME.error_fg, WHALE_ERROR);
+        assert_eq!(UI_THEME.mode_operate, MODE_OPERATE);
+        assert_eq!(LIGHT_UI_THEME.accent_primary, LIGHT_ACTION);
+        assert_eq!(LIGHT_UI_THEME.status_working, LIGHT_LIVE);
+        assert_eq!(LIGHT_UI_THEME.accent_action, LIGHT_HUMAN);
+        assert_eq!(LIGHT_UI_THEME.warning, LIGHT_WARNING);
+        assert_eq!(LIGHT_UI_THEME.error_fg, LIGHT_DANGER);
+        assert_eq!(LIGHT_UI_THEME.mode_operate, LIGHT_OPERATE);
+    }
 
     /// Dogfood A7 (#4092): every mode must be tellable apart from the footer
     /// badge alone — Operate must never wear the YOLO red again.

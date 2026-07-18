@@ -2358,13 +2358,13 @@ fn approval_palette(stakes: crate::tui::approval::ApprovalStakes) -> ApprovalCol
     match stakes {
         ApprovalStakes::Routine => ApprovalColors {
             border: palette::BORDER_COLOR,
-            accent: palette::WHALE_INFO,
+            accent: palette::WHALE_HUMAN,
             shortcut: palette::WHALE_INFO,
         },
         // Ordinary state-touching work: a calm ask, not an alarm.
         ApprovalStakes::Elevated => ApprovalColors {
-            border: palette::BORDER_COLOR,
-            accent: palette::STATUS_WARNING,
+            border: palette::WHALE_HUMAN,
+            accent: palette::WHALE_HUMAN,
             shortcut: palette::WHALE_INFO,
         },
         ApprovalStakes::Critical => ApprovalColors {
@@ -4126,7 +4126,7 @@ mod tests {
         ACTIVE_REVISION_DOMAIN, ApprovalWidget, COMPOSER_PANEL_HEIGHT, COMPOSER_PLACEHOLDER,
         ChatWidget, ComposerWidget, Renderable, SlashMenuEntry, active_entry_revision,
         ambient_ping_pong, apply_detail_target_highlight, apply_selection_to_line,
-        apply_send_flash, build_empty_state_lines, composer_content_geometry,
+        apply_send_flash, approval_palette, build_empty_state_lines, composer_content_geometry,
         composer_empty_hint_text, composer_height, composer_max_height, composer_min_input_rows,
         composer_top_padding, cursor_row_col, empty_composer_visual_rows, fish_flee_offset,
         fish_heading, fish_mark, history_entry_revision, layout_input, layout_input_with_scroll,
@@ -4197,6 +4197,21 @@ mod tests {
             text.push('\n');
         }
         text
+    }
+
+    #[test]
+    fn approval_palette_reserves_signal_gold_for_human_decisions() {
+        use crate::tui::approval::ApprovalStakes;
+
+        let routine = approval_palette(ApprovalStakes::Routine);
+        let elevated = approval_palette(ApprovalStakes::Elevated);
+        let critical = approval_palette(ApprovalStakes::Critical);
+
+        assert_eq!(routine.accent, palette::WHALE_HUMAN);
+        assert_eq!(routine.shortcut, palette::WHALE_ACTION);
+        assert_eq!(elevated.border, palette::WHALE_HUMAN);
+        assert_eq!(elevated.accent, palette::WHALE_HUMAN);
+        assert_eq!(critical.accent, palette::WHALE_ERROR);
     }
 
     #[test]
