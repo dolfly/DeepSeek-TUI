@@ -577,6 +577,11 @@ not persisted in `TurnRecord`.
 - If the process restarts while a turn or item is `queued` or `in_progress`,
   the recovered record is marked `interrupted` with an `"Interrupted by
   process restart"` error.
+- The trailing newline is an event append's commit marker. On startup, a final
+  JSONL fragment without that delimiter is truncated and fsynced even when its
+  bytes form valid JSON; it is an uncommitted append, and its already-reserved
+  sequence number is not reused. Newline-terminated malformed records are not
+  identifiable crash debris and continue to fail closed during replay.
 - If a terminal turn record reached disk but its terminal event sequence did
   not, the first async read reconciles any unresolved dynamic calls as
   `tool_call.canceled` and then emits one `turn.completed`. Existing terminal

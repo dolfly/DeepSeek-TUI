@@ -1669,14 +1669,28 @@ async fn wait_for_terminal_turn(
     let deadline = Instant::now() + timeout;
     loop {
         let turn = manager.store.load_turn(turn_id)?;
-        if matches!(
+        let terminal = matches!(
             turn.status,
             RuntimeTurnStatus::Completed
                 | RuntimeTurnStatus::Failed
                 | RuntimeTurnStatus::Interrupted
                 | RuntimeTurnStatus::Canceled
-        ) {
-            return Ok(turn);
+        );
+        if terminal {
+            let receipt_is_durable =
+                manager
+                    .events_since(&turn.thread_id, None)?
+                    .iter()
+                    .any(|event| {
+                        event.event == "turn.completed" && event.turn_id.as_deref() == Some(turn_id)
+                    });
+            let claim_is_clear = manager
+                .active_turn_flags(&turn.thread_id, turn_id)
+                .await
+                .is_none();
+            if receipt_is_durable && claim_is_clear {
+                return Ok(turn);
+            }
         }
         if Instant::now() >= deadline {
             bail!("Timed out waiting for turn {turn_id}");
@@ -1761,6 +1775,72 @@ async fn store_open_truncates_only_torn_final_event_record_and_preserves_sequenc
             .collect::<Vec<_>>(),
         vec![first.seq, after_repair.seq]
     );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn store_open_treats_valid_json_without_newline_as_uncommitted_append() {
+    let dir = test_runtime_dir();
+    let store = RuntimeThreadStore::open(dir.clone()).expect("open store");
+    let committed = store
+        .append_event(
+            "thr_missing_commit_marker",
+            None,
+            None,
+            "committed",
+            json!({ "value": 1 }),
+        )
+        .await
+        .expect("append committed event");
+    let uncommitted = store
+        .append_event(
+            "thr_missing_commit_marker",
+            None,
+            None,
+            "missing_marker",
+            json!({ "value": 2 }),
+        )
+        .await
+        .expect("append event whose commit marker will be removed");
+    let path = store
+        .events_path("thr_missing_commit_marker")
+        .expect("event path");
+    let encoded = std::fs::read(&path).expect("read event log");
+    assert_eq!(encoded.last(), Some(&b'\n'));
+    let without_marker = &encoded[..encoded.len() - 1];
+    let final_json = without_marker
+        .rsplit(|byte| *byte == b'\n')
+        .next()
+        .expect("final JSON record");
+    serde_json::from_slice::<RuntimeEventRecord>(final_json)
+        .expect("the unterminated tail must otherwise be valid JSON");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("open event log for simulated crash")
+        .set_len(u64::try_from(without_marker.len()).expect("event log length fits u64"))
+        .expect("remove only the newline commit marker");
+    drop(store);
+
+    let reopened = RuntimeThreadStore::open(dir.clone()).expect("repair uncommitted event tail");
+    let replay = reopened
+        .events_since("thr_missing_commit_marker", None)
+        .expect("replay repaired event log");
+    assert_eq!(replay.len(), 1);
+    assert_eq!(replay[0].seq, committed.seq);
+
+    let after_repair = reopened
+        .append_event(
+            "thr_missing_commit_marker",
+            None,
+            None,
+            "after_repair",
+            json!({ "value": 3 }),
+        )
+        .await
+        .expect("append after repair");
+    assert_eq!(after_repair.seq, uncommitted.seq.saturating_add(1));
 
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -4076,10 +4156,47 @@ async fn thread_detail_cursor_precedes_projection_reads_at_terminal_boundary() -
         })
         .await?;
 
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), async {
+            loop {
+                if manager
+                    .events_since(&thread.id, Some(point.latest_seq))?
+                    .iter()
+                    .any(|event| {
+                        event.turn_id.as_deref() == Some(&turn.id)
+                            && event.event == "turn.completed"
+                    })
+                {
+                    break Ok::<_, anyhow::Error>(());
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_err(),
+        "terminal publication crossed a snapshot projection boundary"
+    );
+    point
+        .resume
+        .send(())
+        .map_err(|_| anyhow!("snapshot dropped its resume barrier"))?;
+
+    let detail = snapshot_task.await.context("snapshot task panicked")??;
+    assert_eq!(detail.latest_seq, point.latest_seq);
+    assert_eq!(
+        detail
+            .turns
+            .iter()
+            .find(|record| record.id == turn.id)
+            .map(|record| record.status),
+        Some(RuntimeTurnStatus::InProgress),
+        "the paused snapshot must retain the pre-terminal projection"
+    );
+
     let completed_event = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             if let Some(event) = manager
-                .events_since(&thread.id, Some(point.latest_seq))?
+                .events_since(&thread.id, Some(detail.latest_seq))?
                 .into_iter()
                 .find(|event| {
                     event.turn_id.as_deref() == Some(&turn.id) && event.event == "turn.completed"
@@ -4091,24 +4208,8 @@ async fn thread_detail_cursor_precedes_projection_reads_at_terminal_boundary() -
         }
     })
     .await
-    .context("terminal event did not cross the paused snapshot boundary")??;
-    point
-        .resume
-        .send(())
-        .map_err(|_| anyhow!("snapshot dropped its resume barrier"))?;
-
-    let detail = snapshot_task.await.context("snapshot task panicked")??;
-    assert_eq!(detail.latest_seq, point.latest_seq);
+    .context("terminal event did not follow the released snapshot boundary")??;
     assert!(completed_event.seq > detail.latest_seq);
-    assert_eq!(
-        detail
-            .turns
-            .iter()
-            .find(|record| record.id == turn.id)
-            .map(|record| record.status),
-        Some(RuntimeTurnStatus::Completed),
-        "the snapshot should contain the concurrently saved terminal projection"
-    );
     assert!(
         manager
             .events_since(&thread.id, Some(detail.latest_seq))?
@@ -5395,6 +5496,69 @@ async fn restart_reconciles_unresolved_dynamic_call_after_existing_turn_completi
             .count(),
         1,
         "recovery duplicated an already durable turn completion"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_recovery_dedupe_scans_emit_each_terminal_receipt_once() -> Result<()> {
+    let manager = test_manager(test_runtime_dir())?;
+    let thread = manager
+        .create_thread(CreateThreadRequest::default())
+        .await?;
+    let turn_id = "turn_concurrent_recovery_dedupe";
+    let call_id = "call_concurrent_recovery_dedupe";
+    let mut turn = sample_turn(&thread.id, turn_id, RuntimeTurnStatus::Completed);
+    turn.ended_at = Some(Utc::now());
+    let params = DynamicToolCallParams {
+        thread_id: thread.id.clone(),
+        turn_id: turn_id.to_string(),
+        call_id: call_id.to_string(),
+        namespace: Some("recovery".to_string()),
+        tool: "dedupe_lookup".to_string(),
+        arguments: json!({ "record": "same-terminal-receipt" }),
+    };
+
+    let (first_call, second_call) = tokio::join!(
+        manager.emit_recovered_dynamic_cancellation_if_missing(&params),
+        manager.emit_recovered_dynamic_cancellation_if_missing(&params),
+    );
+    assert_eq!(
+        usize::from(first_call?) + usize::from(second_call?),
+        1,
+        "the event_emit boundary must linearize dynamic-terminal dedupe"
+    );
+
+    let (first_turn, second_turn) = tokio::join!(
+        manager.emit_turn_completed_if_missing(&turn, true),
+        manager.emit_turn_completed_if_missing(&turn, true),
+    );
+    assert_eq!(
+        usize::from(first_turn?) + usize::from(second_turn?),
+        1,
+        "the event_emit boundary must linearize turn-completion dedupe"
+    );
+
+    let events = manager.events_since(&thread.id, None)?;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| {
+                event.event == "tool_call.canceled"
+                    && event.turn_id.as_deref() == Some(turn_id)
+                    && event.payload.get("call_id").and_then(Value::as_str) == Some(call_id)
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| {
+                event.event == "turn.completed" && event.turn_id.as_deref() == Some(turn_id)
+            })
+            .count(),
+        1
     );
     Ok(())
 }

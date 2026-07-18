@@ -919,6 +919,10 @@ impl RuntimeThreadStore {
             .with_context(|| format!("Failed to inspect {}", path.display()))?
             .len();
         let mut line = serde_json::to_vec(&record)?;
+        // The trailing newline is the JSONL transaction's commit marker. A
+        // crash after all JSON bytes reach the file but before this delimiter
+        // is written leaves a parseable yet uncommitted tail; startup removes
+        // that tail and deliberately does not reuse its reserved sequence.
         line.push(b'\n');
         let append_result = (|| -> std::io::Result<()> {
             file.write_all(&line)?;
@@ -1444,7 +1448,8 @@ struct RecoveredTurnReceipt {
 ///   order and is only acquired after all record/engine guards are released.
 /// - `RuntimeThreadManager::projection_locks` — one async lock per thread,
 ///   held while a streamed item checkpoint and its event are published or
-///   while a snapshot captures its cursor and reads projections.
+///   while a terminal turn projection, receipt, and active-claim cleanup are
+///   published, or while a snapshot captures its cursor and reads projections.
 /// - `RuntimeThreadManager::recovery_flush` — serializes deferred receipt
 ///   reconciliation before it acquires a projection lock and `event_emit`.
 /// - `RuntimeThreadStore::state` — protects the monotonic event sequence counter.
@@ -2504,12 +2509,16 @@ impl RuntimeThreadManager {
         recovered: bool,
     ) -> Result<bool> {
         let _emit_order = self.event_emit.lock().await;
-        if self.store.contains_event(
-            &turn.thread_id,
-            &RuntimeEventMatch::TurnCompleted {
-                turn_id: turn.id.clone(),
-            },
-        )? {
+        let store = self.store.clone();
+        let thread_id = turn.thread_id.clone();
+        let expected = RuntimeEventMatch::TurnCompleted {
+            turn_id: turn.id.clone(),
+        };
+        let already_emitted =
+            tokio::task::spawn_blocking(move || store.contains_event(&thread_id, &expected))
+                .await
+                .context("Runtime turn-completion dedupe scan failed")??;
+        if already_emitted {
             return Ok(false);
         }
         let mut payload = json!({ "turn": turn });
@@ -2532,13 +2541,17 @@ impl RuntimeThreadManager {
         params: &DynamicToolCallParams,
     ) -> Result<bool> {
         let _emit_order = self.event_emit.lock().await;
-        if self.store.contains_event(
-            &params.thread_id,
-            &RuntimeEventMatch::DynamicTerminal {
-                turn_id: params.turn_id.clone(),
-                call_id: params.call_id.clone(),
-            },
-        )? {
+        let store = self.store.clone();
+        let thread_id = params.thread_id.clone();
+        let expected = RuntimeEventMatch::DynamicTerminal {
+            turn_id: params.turn_id.clone(),
+            call_id: params.call_id.clone(),
+        };
+        let already_emitted =
+            tokio::task::spawn_blocking(move || store.contains_event(&thread_id, &expected))
+                .await
+                .context("Runtime dynamic-tool terminal dedupe scan failed")??;
+        if already_emitted {
             return Ok(false);
         }
         let mut payload =
@@ -4021,25 +4034,19 @@ impl RuntimeThreadManager {
             let _turn_mutation = self.store.turn_mutation.lock();
             match self.store.load_turn(turn_id) {
                 Ok(mut turn) => {
-                    let mut persisted = true;
                     if turn.status == RuntimeTurnStatus::InProgress {
                         turn.status = RuntimeTurnStatus::Failed;
                         turn.ended_at = Some(now);
                         turn.duration_ms = turn.started_at.map(|start| duration_ms(start, now));
                         turn.error = Some(reason.to_string());
-                        if let Err(err) = self.store.save_turn(&turn) {
-                            tracing::error!("Failed to persist terminal monitor failure: {err}");
-                            persisted = false;
-                        }
                     }
-                    (persisted
-                        && matches!(
-                            turn.status,
-                            RuntimeTurnStatus::Completed
-                                | RuntimeTurnStatus::Failed
-                                | RuntimeTurnStatus::Interrupted
-                                | RuntimeTurnStatus::Canceled
-                        ))
+                    matches!(
+                        turn.status,
+                        RuntimeTurnStatus::Completed
+                            | RuntimeTurnStatus::Failed
+                            | RuntimeTurnStatus::Interrupted
+                            | RuntimeTurnStatus::Canceled
+                    )
                     .then_some(turn)
                 }
                 Err(err) => {
@@ -4078,12 +4085,6 @@ impl RuntimeThreadManager {
             .await
         {
             tracing::error!("Failed to emit user-input cancellation after monitor failure: {err}");
-            if let Some(turn) = terminal_turn.as_ref() {
-                self.queue_recovery_receipt(RecoveredTurnReceipt {
-                    turn: turn.clone(),
-                    unresolved_dynamic_tools: Vec::new(),
-                });
-            }
             false
         } else {
             true
@@ -4096,27 +4097,42 @@ impl RuntimeThreadManager {
             tracing::error!(
                 "Failed to emit dynamic-tool cancellation after monitor failure: {err}"
             );
-            if let Some(turn) = terminal_turn.as_ref() {
-                self.queue_recovery_receipt(RecoveredTurnReceipt {
-                    turn: turn.clone(),
-                    unresolved_dynamic_tools: Vec::new(),
-                });
-            }
             false
         } else {
             true
         };
 
-        if user_inputs_settled
-            && dynamic_tools_settled
-            && let Some(turn) = terminal_turn.as_ref()
-            && let Err(err) = self.emit_turn_completed_if_missing(turn, false).await
-        {
-            tracing::error!("Failed to emit terminal monitor failure: {err}");
-            self.queue_recovery_receipt(RecoveredTurnReceipt {
-                turn: turn.clone(),
-                unresolved_dynamic_tools: Vec::new(),
-            });
+        // A terminal record is the externally visible lifecycle boundary.
+        // Keep snapshots outside that boundary until its terminal receipt and
+        // active-claim cleanup are also ordered. The dedupe scan may yield to
+        // a blocking worker while this projection guard remains held.
+        let projection_lock = self.projection_lock(thread_id);
+        let _projection = projection_lock.lock().await;
+        let terminal_turn = terminal_turn.and_then(|turn| {
+            let _turn_mutation = self.store.turn_mutation.lock();
+            match self.store.save_turn(&turn) {
+                Ok(()) => Some(turn),
+                Err(err) => {
+                    tracing::error!("Failed to persist terminal monitor failure: {err}");
+                    None
+                }
+            }
+        });
+        if let Some(turn) = terminal_turn.as_ref() {
+            if user_inputs_settled && dynamic_tools_settled {
+                if let Err(err) = self.emit_turn_completed_if_missing(turn, false).await {
+                    tracing::error!("Failed to emit terminal monitor failure: {err}");
+                    self.queue_recovery_receipt(RecoveredTurnReceipt {
+                        turn: turn.clone(),
+                        unresolved_dynamic_tools: Vec::new(),
+                    });
+                }
+            } else {
+                self.queue_recovery_receipt(RecoveredTurnReceipt {
+                    turn: turn.clone(),
+                    unresolved_dynamic_tools: Vec::new(),
+                });
+            }
         }
 
         // Keep the failed claim in place until its terminal receipts are
@@ -4137,6 +4153,7 @@ impl RuntimeThreadManager {
             }
         };
         if let Some(engine) = evicted_engine {
+            drop(_projection);
             engine.cancel_with_reason(crate::core::engine::CancelReason::Internal);
             let _ = engine.try_send(Op::Shutdown);
         }
@@ -6225,17 +6242,8 @@ impl RuntimeThreadManager {
                 })
                 .map(str::to_string);
             turn.error = turn_error;
-            self.store.save_turn(&turn)?;
             turn
         };
-
-        {
-            let _thread_mutation = self.store.thread_mutation.lock();
-            let mut thread = self.store.load_thread(&thread_id)?;
-            thread.latest_turn_id = Some(turn_id.clone());
-            thread.updated_at = Utc::now();
-            self.store.save_thread(&thread)?;
-        }
 
         // A terminal turn can no longer answer an outstanding prompt. Commit
         // each cancellation while the request remains snapshot-authoritative,
@@ -6246,6 +6254,23 @@ impl RuntimeThreadManager {
         self.settle_dynamic_tools_for_terminal_turn(&thread_id, &turn_id)
             .await?;
 
+        // Publish the terminal projection as one snapshot boundary. The
+        // duplicate scan is offloaded while this guard is held, so public
+        // readers cannot observe a terminal record before its receipt and
+        // active-claim cleanup are ordered.
+        let projection_lock = self.projection_lock(&thread_id);
+        let _projection = projection_lock.lock().await;
+        {
+            let _turn_mutation = self.store.turn_mutation.lock();
+            self.store.save_turn(&turn)?;
+        }
+        {
+            let _thread_mutation = self.store.thread_mutation.lock();
+            let mut thread = self.store.load_thread(&thread_id)?;
+            thread.latest_turn_id = Some(turn_id.clone());
+            thread.updated_at = Utc::now();
+            self.store.save_thread(&thread)?;
+        }
         self.emit_turn_completed_if_missing(&turn, false).await?;
 
         {
@@ -6978,9 +7003,11 @@ fn read_complete_event(
 }
 
 /// Remove only an unterminated final JSONL fragment left by a process or
-/// machine stopping in the middle of `write_all`. A newline-terminated bad
-/// record is not crash debris we can identify safely, so normal replay keeps
-/// rejecting it instead of silently discarding durable data.
+/// machine stopping before the append's newline commit marker. This includes
+/// an otherwise valid JSON object whose delimiter never reached disk: without
+/// the newline, the append did not commit. A newline-terminated bad record is
+/// not crash debris we can identify safely, so normal replay keeps rejecting
+/// it instead of silently discarding durable data.
 fn repair_torn_event_log_tails(events_dir: &Path) -> Result<()> {
     let events_dir = checked_existing_runtime_store_dir(events_dir)?;
     for entry in fs::read_dir(&events_dir)
