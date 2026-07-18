@@ -516,6 +516,55 @@ pub struct McpServerConfig {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_resource: Option<String>,
+    /// In-memory provenance for MCP servers contributed by a reviewed plugin
+    /// bundle. This is never deserialized from or serialized into user config:
+    /// only the trusted plugin merge adapter may attach it.
+    #[serde(skip)]
+    pub(crate) reviewed_plugin: Option<ReviewedPluginMcpSource>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReviewedPluginMcpSource {
+    plugin_name: String,
+    manifest_path: PathBuf,
+    content_hash: String,
+    capability_hash: String,
+}
+
+impl ReviewedPluginMcpSource {
+    fn from_plugin(plugin: &crate::plugins::types::LoadedPlugin) -> Self {
+        Self {
+            plugin_name: plugin.name().to_string(),
+            manifest_path: plugin.canonical_root.join("plugin.toml"),
+            content_hash: plugin.content_hash.clone(),
+            capability_hash: plugin.capability_hash.clone(),
+        }
+    }
+
+    pub(crate) fn validate_before_stdio_spawn(&self, server_name: &str) -> Result<()> {
+        let remediation = format!(
+            "Run `/plugin reload`, inspect `/plugin show {0}`, then repeat the displayed trust command and `/plugin enable {0}` before retrying",
+            self.plugin_name
+        );
+        let current = crate::plugins::manifest::PluginManifest::validate_from_path(
+            &self.manifest_path,
+        )
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "Refusing to spawn MCP server '{server_name}': plugin bundle `{}` could not be revalidated immediately before lazy spawn ({error}). {remediation}",
+                self.plugin_name
+            )
+        })?;
+        if current.content_hash != self.content_hash
+            || current.capability_hash != self.capability_hash
+        {
+            anyhow::bail!(
+                "Refusing to spawn MCP server '{server_name}': plugin bundle `{}` changed after its trust review or MCP pool construction. {remediation}",
+                self.plugin_name
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -2723,6 +2772,7 @@ fn merge_plugin_mcp_servers_from_plugins(
                         server_config.cwd.as_deref(),
                     )?);
                 }
+                server_config.reviewed_plugin = Some(ReviewedPluginMcpSource::from_plugin(&plugin));
 
                 config.servers.insert(qualified_name, server_config);
             }
@@ -2908,6 +2958,7 @@ fn mcp_template_json() -> Result<String> {
             scopes: Vec::new(),
             oauth: None,
             oauth_resource: None,
+            reviewed_plugin: None,
         },
     );
     cfg.servers.insert(
@@ -2933,6 +2984,7 @@ fn mcp_template_json() -> Result<String> {
             scopes: Vec::new(),
             oauth: None,
             oauth_resource: None,
+            reviewed_plugin: None,
         },
     );
     serde_json::to_string_pretty(&cfg).context("Failed to render MCP template JSON")
@@ -2995,6 +3047,7 @@ pub fn add_server_config(
             scopes: Vec::new(),
             oauth: None,
             oauth_resource: None,
+            reviewed_plugin: None,
         },
     );
     save_config(path, &cfg)

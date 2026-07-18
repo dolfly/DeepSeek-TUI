@@ -141,7 +141,10 @@ the host, free of validation errors, and limited to supported component kinds.
   files are not exposed in v0.9.1. Skills disappear when the bundle is
   inactive. `/skills inspect` remains the explicit human provenance view.
 - MCP server names are exposed as `<plugin>-<server>`. Disabled or untrusted
-  bundles are denied again at the headless MCP adapter.
+  bundles are denied again at the headless MCP adapter. Local bundle content
+  and capability hashes are also revalidated immediately before every lazy
+  stdio child spawn; drift fails closed with instructions to reload, review,
+  trust, and enable the bundle again.
 - Plain launch, resume, fork, exec, and serve initialize the registry before
   constructing Skills or MCP configuration.
 - Constitution, repository instructions, permission rules, sandbox policy,

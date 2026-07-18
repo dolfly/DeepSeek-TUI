@@ -2647,6 +2647,7 @@ fn mcp_template_json() -> Result<String> {
             scopes: Vec::new(),
             oauth: None,
             oauth_resource: None,
+            reviewed_plugin: None,
         },
     );
     cfg.servers.insert(
@@ -2672,6 +2673,7 @@ fn mcp_template_json() -> Result<String> {
             scopes: Vec::new(),
             oauth: None,
             oauth_resource: None,
+            reviewed_plugin: None,
         },
     );
     serde_json::to_string_pretty(&cfg)
@@ -7118,6 +7120,7 @@ async fn run_mcp_command(config: &Config, workspace: &Path, command: McpCommand)
                     client_id: Some(client_id),
                 }),
                 oauth_resource,
+                reviewed_plugin: None,
             };
             let can_suggest_oauth = added_server.url.is_some()
                 && added_server.bearer_token_env_var.is_none()
@@ -7262,6 +7265,7 @@ async fn run_mcp_command(config: &Config, workspace: &Path, command: McpCommand)
                     scopes: Vec::new(),
                     oauth: None,
                     oauth_resource: None,
+                    reviewed_plugin: None,
                 },
             );
             save_mcp_config(&config_path, &cfg)?;
@@ -13929,6 +13933,7 @@ mod doctor_mcp_tests {
             scopes: Vec::new(),
             oauth: None,
             oauth_resource: None,
+            reviewed_plugin: None,
         }
     }
 

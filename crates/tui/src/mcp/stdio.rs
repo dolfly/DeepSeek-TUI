@@ -65,6 +65,14 @@ impl StdioTransport {
         command: &str,
         config: &McpServerConfig,
     ) -> Result<Self> {
+        if let Some(reviewed_plugin) = config.reviewed_plugin.as_ref() {
+            // This is deliberately the last trust check before constructing
+            // and spawning the lazy stdio child. It re-reads only the
+            // Codewhale-owned plugin bundle, never user MCP/provider config or
+            // credential files, and fails closed on any content/capability
+            // drift after pool construction.
+            reviewed_plugin.validate_before_stdio_spawn(server_name)?;
+        }
         let mut cmd = tokio::process::Command::new(command);
         crate::utils::suppress_tokio_console_window(&mut cmd);
         cmd.args(&config.args)

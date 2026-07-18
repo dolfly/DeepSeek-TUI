@@ -212,6 +212,7 @@ fn mcp_server_config_omits_headers_when_empty() {
         scopes: Vec::new(),
         oauth: None,
         oauth_resource: None,
+        reviewed_plugin: None,
     };
     let serialized = serde_json::to_string(&cfg).unwrap();
     assert!(
@@ -925,23 +926,24 @@ command = "node"
     assert!(config.servers.is_empty());
 }
 
-fn plugin_with_local_mcp(name: &str, base_path: PathBuf) -> crate::plugins::manifest::LoadedPlugin {
-    let manifest = toml::from_str::<crate::plugins::manifest::PluginManifest>(&format!(
-        r#"
+fn plugin_with_local_mcp(name: &str, base_path: PathBuf) -> crate::plugins::types::LoadedPlugin {
+    fs::write(
+        base_path.join("plugin.toml"),
+        format!(
+            r#"
+schema_version = 1
 [plugin]
 name = "{name}"
+version = "1.0.0"
 
 [mcp_servers.local]
 command = "node"
 args = ["server.js"]
 "#,
-    ))
+        ),
+    )
     .unwrap();
-    crate::plugins::manifest::LoadedPlugin {
-        manifest,
-        base_path,
-        enabled: true,
-    }
+    crate::plugins::discovery::load_plugin_for_test(&base_path.join("plugin.toml")).unwrap()
 }
 
 #[test]
@@ -977,6 +979,78 @@ fn plugin_mcp_servers_merge_without_project_config() {
     assert_eq!(
         local.cwd.as_deref(),
         Some(plugin_base.canonicalize().unwrap().as_path())
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn plugin_mcp_lazy_spawn_denies_component_changed_after_pool_construction() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let plugins_root = dir.path().join("plugins");
+    let plugin_base = plugins_root.join("guarded");
+    fs::create_dir_all(&plugin_base).unwrap();
+    let server_path = plugin_base.join("server.sh");
+    fs::write(&server_path, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut permissions = fs::metadata(&server_path).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&server_path, permissions).unwrap();
+    fs::write(
+        plugin_base.join("plugin.toml"),
+        r#"
+schema_version = 1
+[plugin]
+name = "guarded"
+version = "1.0.0"
+
+[mcp_servers.local]
+command = "sh"
+args = ["server.sh"]
+connect_timeout = 1
+"#,
+    )
+    .unwrap();
+
+    let discovery = crate::plugins::discovery::DiscoveryConfig {
+        user_plugins_dir: plugins_root,
+        workspace_plugins_dir: dir.path().join("workspace-plugins"),
+        builtin_plugin_dirs: Vec::new(),
+        state_path: dir.path().join("plugin-state.json"),
+    };
+    let mut registry = crate::plugins::discovery::discover_with_config(&discovery);
+    registry.trust("guarded").unwrap();
+    registry.enable("guarded").unwrap();
+    let active = registry.active_plugins()[0].clone();
+    let merged = merge_plugin_mcp_servers_from_plugins(
+        McpConfig::default(),
+        vec![("guarded".to_string(), active)],
+    )
+    .unwrap();
+    assert!(
+        merged.servers["guarded-local"].reviewed_plugin.is_some(),
+        "plugin provenance must survive through MCP pool construction"
+    );
+    let mut pool = McpPool::new(merged);
+
+    // Adversarial mutation after trust, enablement, merge, and pool
+    // construction. If the lazy child executes, it creates this marker before
+    // closing stdio, so the regression proves denial happened pre-spawn.
+    let executed_marker = plugin_base.join("executed.marker");
+    fs::write(&server_path, "#!/bin/sh\n: > executed.marker\nexit 0\n").unwrap();
+
+    let error = pool
+        .get_or_connect("guarded-local")
+        .await
+        .err()
+        .expect("changed reviewed component must be denied before spawn");
+    let message = format!("{error:#}");
+    assert!(message.contains("Refusing to spawn MCP server 'guarded-local'"));
+    assert!(message.contains("changed after its trust review or MCP pool construction"));
+    assert!(message.contains("/plugin reload"));
+    assert!(
+        !executed_marker.exists(),
+        "mutated MCP component executed despite pre-spawn hash denial"
     );
 }
 
@@ -1467,6 +1541,7 @@ fn test_server_effective_timeouts() {
         scopes: Vec::new(),
         oauth: None,
         oauth_resource: None,
+        reviewed_plugin: None,
     };
 
     assert_eq!(server_with_override.effective_connect_timeout(&global), 20);
@@ -1592,6 +1667,7 @@ fn test_server_config() -> McpServerConfig {
         scopes: Vec::new(),
         oauth: None,
         oauth_resource: None,
+        reviewed_plugin: None,
     }
 }
 
@@ -1854,6 +1930,7 @@ fn hash_mcp_config_is_stable_and_change_sensitive() {
             scopes: Vec::new(),
             oauth: None,
             oauth_resource: None,
+            reviewed_plugin: None,
         },
     );
     assert_ne!(
@@ -2641,6 +2718,7 @@ async fn mcp_connection_supports_streamable_http_event_stream_responses() {
         scopes: Vec::new(),
         oauth: None,
         oauth_resource: None,
+        reviewed_plugin: None,
     };
 
     let conn = McpConnection::connect_with_policy(
@@ -3487,6 +3565,7 @@ async fn streamable_http_stale_session_reconnects_and_retries_tool_call() {
             scopes: Vec::new(),
             oauth: None,
             oauth_resource: None,
+            reviewed_plugin: None,
         },
     );
     let mut pool = McpPool::new(cfg);
@@ -3763,6 +3842,7 @@ async fn legacy_sse_closed_stream_reconnects_and_retries_tool_call() {
             scopes: Vec::new(),
             oauth: None,
             oauth_resource: None,
+            reviewed_plugin: None,
         },
     );
     let mut pool = McpPool::new(cfg);
