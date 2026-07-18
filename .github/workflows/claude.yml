@@ -52,7 +52,6 @@ jobs:
     permissions:
       contents: write
       issues: write
-      pull-requests: write
       id-token: write
     steps:
       - name: Checkout the trusted base branch
