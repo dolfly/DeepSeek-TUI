@@ -65,10 +65,12 @@ pub struct BehavioralTipState {
 }
 
 impl BehavioralTipState {
+    fn eligible_in_session(&self, tip: BehavioralTip) -> bool {
+        self.session_impressions < MAX_TIPS_PER_SESSION && !self.shown_this_session.contains(&tip)
+    }
+
     fn eligible(&self, tip: BehavioralTip, lifetime_impressions: u8) -> bool {
-        self.session_impressions < MAX_TIPS_PER_SESSION
-            && !self.shown_this_session.contains(&tip)
-            && lifetime_impressions < MAX_LIFETIME_IMPRESSIONS
+        self.eligible_in_session(tip) && lifetime_impressions < MAX_LIFETIME_IMPRESSIONS
     }
 
     fn record_impression(&mut self, tip: BehavioralTip) {
@@ -96,6 +98,11 @@ impl App {
     /// lifetime cap allow it. Persistence is best-effort: a read-only home
     /// must not make a useful in-session hint fail closed.
     pub fn maybe_show_behavioral_tip(&mut self, tip: BehavioralTip) -> bool {
+        // Clear-input hooks are hot paths. Once the in-memory session gate is
+        // closed, avoid touching the settings file for every later keypress.
+        if !self.behavioral_tips.eligible_in_session(tip) {
+            return false;
+        }
         let mut settings = if cfg!(test) {
             Settings::default()
         } else {
