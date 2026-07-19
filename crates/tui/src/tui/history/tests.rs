@@ -845,6 +845,24 @@ fn archived_context_metadata_preserves_spaces_in_attributes() {
 }
 
 #[test]
+fn tool_history_repair_receipt_renders_as_system_history() {
+    let msg = Message {
+        role: "assistant".to_string(),
+        content: vec![ContentBlock::Text {
+            text: "[tool_history_repair] Repaired 1 crashed tool call(s); quarantined 0 duplicate and 0 orphan terminal result(s).".to_string(),
+            cache_control: None,
+        }],
+    };
+
+    let cells = super::history_cells_from_message(&msg);
+
+    assert!(matches!(
+        cells.as_slice(),
+        [HistoryCell::System { content }] if content.starts_with("[tool_history_repair]")
+    ));
+}
+
+#[test]
 fn history_replays_update_plan_tool_use_as_plan_card() {
     let msg = Message {
         role: "assistant".to_string(),

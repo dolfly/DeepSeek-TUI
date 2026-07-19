@@ -626,6 +626,18 @@ impl SessionManager {
 
         session.system_prompt = strip_legacy_truncation_note(session.system_prompt);
 
+        let repair = crate::tool_history_repair::repair_tool_call_pairs(&mut session.messages);
+        if !repair.is_empty() {
+            session.metadata.message_count = session.messages.len();
+            tracing::warn!(
+                session_id = %session.metadata.id,
+                repaired_call_ids = ?repair.repaired_call_ids,
+                duplicate_result_ids = ?repair.duplicate_result_ids,
+                orphan_result_ids = ?repair.orphan_result_ids,
+                "repaired persisted tool call/result history"
+            );
+        }
+
         Ok(session)
     }
 
@@ -1469,6 +1481,51 @@ mod tests {
         let loaded = manager.load_session(&session_id).expect("load");
         assert_eq!(loaded.metadata.id, session_id);
         assert_eq!(loaded.messages.len(), 2);
+    }
+
+    #[test]
+    fn load_session_repairs_dangling_tool_call_with_visible_receipt() {
+        let tmp = tempdir().expect("tempdir");
+        let manager = SessionManager::new(tmp.path().join("sessions")).expect("new");
+        let messages = vec![Message {
+            role: "assistant".to_string(),
+            content: vec![ContentBlock::ToolUse {
+                id: "call-crashed".to_string(),
+                name: "read_file".to_string(),
+                input: serde_json::json!({"path": "README.md"}),
+                caller: None,
+            }],
+        }];
+        let session = create_saved_session(&messages, "test-model", tmp.path(), 0, None);
+        let session_id = session.metadata.id.clone();
+        manager.save_session(&session).expect("save");
+
+        let loaded = manager.load_session(&session_id).expect("load");
+
+        assert_eq!(loaded.metadata.message_count, loaded.messages.len());
+        assert!(loaded.messages.iter().any(|message| {
+            message.content.iter().any(|block| {
+                matches!(
+                    block,
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        is_error: Some(true),
+                        ..
+                    } if tool_use_id == "call-crashed" && content.contains("crashed_and_repaired")
+                )
+            })
+        }));
+        assert!(loaded.messages.iter().any(|message| {
+            message.role == "assistant"
+                && message.content.iter().any(|block| {
+                    matches!(
+                        block,
+                        ContentBlock::Text { text, .. }
+                            if text.contains("[tool_history_repair]")
+                    )
+                })
+        }));
     }
 
     #[test]

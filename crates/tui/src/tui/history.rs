@@ -458,6 +458,12 @@ pub fn history_cells_from_message(msg: &Message) -> Vec<HistoryCell> {
     for block in &msg.content {
         match block {
             ContentBlock::Text { text, .. } => {
+                if text.starts_with("[tool_history_repair]") {
+                    cells.push(HistoryCell::System {
+                        content: text.clone(),
+                    });
+                    continue;
+                }
                 // Check if this is an `<archived_context>` block.
                 if msg.role == "assistant"
                     && let Some(archived) = parse_archived_context(text)

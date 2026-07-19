@@ -117,6 +117,7 @@ mod task_manager;
 #[cfg(test)]
 mod test_support;
 mod tls;
+mod tool_history_repair;
 mod tool_output_receipts;
 mod tools;
 mod tui;
@@ -9329,6 +9330,7 @@ fn tool_error_receipt_category(error: &crate::tools::spec::ToolError) -> &'stati
         ToolError::PathEscape { .. } => "path_escape",
         ToolError::ExecutionFailed { .. } => "execution_failed",
         ToolError::Timeout { .. } => "timeout",
+        ToolError::Cancelled { .. } => "cancelled",
         ToolError::NotAvailable { .. } => "not_available",
         ToolError::PermissionDenied { .. } => "permission_denied",
     }

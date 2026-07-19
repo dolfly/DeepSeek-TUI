@@ -2076,7 +2076,8 @@ impl Engine {
                 // Interrupted. This branch is a no-op on the normal path.
                 if self.cancel_token.is_cancelled() {
                     for plan in plans {
-                        let result = Ok(interrupted_tool_result());
+                        let terminal = ToolExecutionOutcome::cancelled(interrupted_tool_result());
+                        let result = terminal.legacy_result();
                         let _ = self
                             .tx_event
                             .send(Event::ToolCallComplete {
@@ -2091,7 +2092,7 @@ impl Engine {
                             name: plan.name,
                             input: plan.input,
                             started_at: Instant::now(),
-                            result,
+                            terminal,
                         });
                     }
                     continue;
@@ -2129,7 +2130,7 @@ impl Engine {
                                 name: plan.name,
                                 input: plan.input,
                                 started_at: Instant::now(),
-                                result,
+                                terminal: ToolExecutionOutcome::from_legacy(result),
                             });
                             continue;
                         }
@@ -2140,7 +2141,7 @@ impl Engine {
                                 name: plan.name,
                                 input: plan.input,
                                 started_at: Instant::now(),
-                                result: Err(err),
+                                terminal: ToolExecutionOutcome::from_legacy(Err(err)),
                             });
                             continue;
                         }
@@ -2208,7 +2209,7 @@ impl Engine {
                                 name: plan.name,
                                 input: plan.input,
                                 started_at,
-                                result,
+                                terminal: ToolExecutionOutcome::from_legacy(result),
                             }
                         });
                     }
@@ -2237,7 +2238,9 @@ impl Engine {
                             if outcomes[index].is_some() {
                                 continue;
                             }
-                            let result = Ok(interrupted_tool_result());
+                            let terminal =
+                                ToolExecutionOutcome::cancelled(interrupted_tool_result());
+                            let result = terminal.legacy_result();
                             let _ = self
                                 .tx_event
                                 .send(Event::ToolCallComplete {
@@ -2252,7 +2255,7 @@ impl Engine {
                                 name,
                                 input,
                                 started_at: Instant::now(),
-                                result,
+                                terminal,
                             });
                         }
                     }
@@ -2279,7 +2282,7 @@ impl Engine {
                                 name: tool_name,
                                 input: tool_input,
                                 started_at: Instant::now(),
-                                result,
+                                terminal: ToolExecutionOutcome::from_legacy(result),
                             });
                             continue;
                         }
@@ -2300,7 +2303,7 @@ impl Engine {
                                 name: tool_name,
                                 input: tool_input,
                                 started_at: Instant::now(),
-                                result,
+                                terminal: ToolExecutionOutcome::from_legacy(result),
                             });
                             continue;
                         }
@@ -2308,15 +2311,18 @@ impl Engine {
                         if tool_name == MULTI_TOOL_PARALLEL_NAME {
                             let started_at = Instant::now();
                             let cancel_token = self.cancel_token.clone();
-                            let result = tokio::select! {
+                            let terminal = tokio::select! {
                                 biased;
-                                () = cancel_token.cancelled() => Ok(interrupted_tool_result()),
+                                () = cancel_token.cancelled() => {
+                                    ToolExecutionOutcome::cancelled(interrupted_tool_result())
+                                },
                                 result = self.execute_parallel_tool(
                                     tool_input.clone(),
                                     tool_registry,
                                     tool_exec_lock.clone(),
-                                ) => result,
+                                ) => ToolExecutionOutcome::from_legacy(result),
                             };
+                            let result = terminal.legacy_result();
 
                             let _ = self
                                 .tx_event
@@ -2333,7 +2339,7 @@ impl Engine {
                                 name: tool_name,
                                 input: tool_input,
                                 started_at,
-                                result,
+                                terminal,
                             });
                             continue;
                         }
@@ -2362,7 +2368,7 @@ impl Engine {
                                 name: tool_name,
                                 input: tool_input,
                                 started_at,
-                                result,
+                                terminal: ToolExecutionOutcome::from_legacy(result),
                             });
                             continue;
                         }
@@ -2395,7 +2401,7 @@ impl Engine {
                                 name: tool_name,
                                 input: tool_input,
                                 started_at,
-                                result,
+                                terminal: ToolExecutionOutcome::from_legacy(result),
                             });
                             continue;
                         }
@@ -2510,26 +2516,29 @@ impl Engine {
                         }
 
                         let started_at = Instant::now();
-                        let mut result = if let Some(result_override) = result_override {
-                            result_override
-                        } else {
-                            tokio::select! {
-                                biased;
-                                () = self.cancel_token.cancelled() => Ok(interrupted_tool_result()),
-                                result = Self::execute_tool_with_lock(
-                                    tool_exec_lock.clone(),
-                                    plan.supports_parallel,
-                                    plan.interactive,
-                                    self.tx_event.clone(),
-                                    tool_name.clone(),
-                                    tool_input.clone(),
-                                    self.session.workspace.clone(),
-                                    tool_registry,
-                                    mcp_pool.clone(),
-                                    context_override,
-                                ) => result,
-                            }
-                        };
+                        let (mut result, cancelled_before_completion) =
+                            if let Some(result_override) = result_override {
+                                (result_override, false)
+                            } else {
+                                tokio::select! {
+                                    biased;
+                                    () = self.cancel_token.cancelled() => {
+                                        (Ok(interrupted_tool_result()), true)
+                                    },
+                                    result = Self::execute_tool_with_lock(
+                                        tool_exec_lock.clone(),
+                                        plan.supports_parallel,
+                                        plan.interactive,
+                                        self.tx_event.clone(),
+                                        tool_name.clone(),
+                                        tool_input.clone(),
+                                        self.session.workspace.clone(),
+                                        tool_registry,
+                                        mcp_pool.clone(),
+                                        context_override,
+                                    ) => (result, false),
+                                }
+                            };
 
                         if let Some(approval_stamp) = approval_stamp
                             && let Ok(tool_result) = result.as_mut()
@@ -2570,13 +2579,20 @@ impl Engine {
                             })
                             .await;
 
+                        let terminal = if cancelled_before_completion {
+                            ToolExecutionOutcome::cancelled(
+                                result.expect("cancelled tool result is always model-visible"),
+                            )
+                        } else {
+                            ToolExecutionOutcome::from_legacy(result)
+                        };
                         outcomes[plan.index] = Some(ToolExecOutcome {
                             index: plan.index,
                             id: tool_id,
                             name: tool_name,
                             input: tool_input,
                             started_at,
-                            result,
+                            terminal,
                         });
                     }
                 }
@@ -2602,7 +2618,9 @@ impl Engine {
             for outcome in outcomes.into_iter().flatten() {
                 let tool_input = outcome.input.clone();
                 let tool_name_for_ws = outcome.name.clone();
-                let observed_signal = match &outcome.result {
+                let terminal_status = outcome.terminal.status;
+                let result = outcome.terminal.into_legacy_result();
+                let observed_signal = match &result {
                     Ok(output) if output.success => {
                         stuck_guard.observe(StepFingerprint::tool(&outcome.name, &tool_input, None))
                     }
@@ -2628,14 +2646,15 @@ impl Engine {
                     goal_tool_ran = true;
                 }
                 let should_stop_this_turn =
-                    should_stop_after_plan_tool(mode, &outcome.name, &outcome.result);
+                    should_stop_after_plan_tool(mode, &outcome.name, &result);
 
-                match outcome.result {
+                match result {
                     Ok(output) => {
                         emit_tool_audit(json!({
                             "event": "tool.result",
                             "tool_id": outcome.id.clone(),
                             "tool_name": outcome.name.clone(),
+                            "status": terminal_status.as_str(),
                             "success": output.success,
                         }));
                         let output_for_context = compact_tool_result_for_route(
@@ -2693,6 +2712,7 @@ impl Engine {
                             "event": "tool.result",
                             "tool_id": outcome.id.clone(),
                             "tool_name": outcome.name.clone(),
+                            "status": terminal_status.as_str(),
                             "success": false,
                             "error": e.to_string(),
                             "category": envelope.category.to_string(),

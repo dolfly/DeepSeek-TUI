@@ -629,7 +629,7 @@ async fn wait_for_activity(
         tokio::select! {
             biased;
             () = &mut cancelled => {
-                return Err(ToolError::execution_failed(
+                return Err(ToolError::cancelled(
                     "Wait interrupted by user cancellation before child activity.".to_string(),
                 ));
             }

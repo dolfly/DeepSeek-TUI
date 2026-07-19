@@ -380,7 +380,7 @@ async fn sleep_until_next_poll(
     let delay = remaining.min(poll_interval);
     if let Some(token) = context.cancel_token.as_ref() {
         tokio::select! {
-            () = token.cancelled() => Err(ToolError::execution_failed("wait_for_dev_server cancelled")),
+            () = token.cancelled() => Err(ToolError::cancelled("wait_for_dev_server cancelled")),
             () = sleep(delay) => Ok(()),
         }
     } else {
@@ -395,7 +395,7 @@ fn check_cancelled(context: &ToolContext) -> Result<(), ToolError> {
         .as_ref()
         .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
     {
-        return Err(ToolError::execution_failed("wait_for_dev_server cancelled"));
+        return Err(ToolError::cancelled("wait_for_dev_server cancelled"));
     }
     Ok(())
 }

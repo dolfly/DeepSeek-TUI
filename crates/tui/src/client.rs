@@ -1012,6 +1012,16 @@ impl DeepSeekClient {
     /// Anthropic Messages, and OpenAI Responses — streaming and non-streaming
     /// alike — receive the same sanitized payload.
     fn prepare_model_bound_request(&self, mut request: MessageRequest) -> MessageRequest {
+        let repair =
+            crate::tool_history_repair::repair_tool_call_pairs_for_provider(&mut request.messages);
+        if !repair.is_empty() {
+            tracing::warn!(
+                repaired_call_ids = ?repair.repaired_call_ids,
+                duplicate_result_ids = ?repair.duplicate_result_ids,
+                orphan_result_ids = ?repair.orphan_result_ids,
+                "repaired tool call/result history before provider projection"
+            );
+        }
         for message in &mut request.messages {
             for block in &mut message.content {
                 if let ContentBlock::ToolResult { content, .. } = block {
@@ -2827,6 +2837,43 @@ mod tests {
                 _ => None,
             })
             .expect("tool result content")
+    }
+
+    #[test]
+    fn model_bound_request_repairs_dangling_tool_call_before_adapter_projection() {
+        let client = client_with_config_secret_sentinels();
+        let mut request = request_with_tool_result("unused");
+        request.messages.pop();
+
+        let prepared = client.prepare_model_bound_request(request);
+
+        assert!(prepared.messages.iter().any(|message| {
+            message.content.iter().any(|block| {
+                matches!(
+                    block,
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        is_error: Some(true),
+                        ..
+                    } if tool_use_id == "call-secret-test"
+                        && content.contains("crashed_and_repaired")
+                )
+            })
+        }));
+        assert_eq!(
+            prepared.messages.last().expect("repaired result").role,
+            "user"
+        );
+        assert!(!prepared.messages.iter().any(|message| {
+            message.content.iter().any(|block| {
+                matches!(
+                    block,
+                    ContentBlock::Text { text, .. }
+                        if text.contains("[tool_history_repair]")
+                )
+            })
+        }));
     }
 
     #[test]

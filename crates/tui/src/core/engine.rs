@@ -50,7 +50,9 @@ use crate::seam_manager::{SeamConfig, SeamManager};
 use crate::tools::goal::{GoalSnapshot, GoalStatus, SharedGoalState, new_shared_goal_state};
 use crate::tools::plan::{PlanSnapshot, SharedPlanState, new_shared_plan_state};
 use crate::tools::shell::{SharedShellManager, new_shared_shell_manager};
-use crate::tools::spec::{ApprovalRequirement, ResourceClaim, ToolError, ToolResult};
+use crate::tools::spec::{
+    ApprovalRequirement, ResourceClaim, ToolError, ToolExecutionOutcome, ToolResult,
+};
 use crate::tools::spec::{
     RuntimeToolServices, SharedFileReadTracker, new_shared_file_read_tracker,
 };

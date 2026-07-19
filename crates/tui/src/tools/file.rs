@@ -1213,7 +1213,7 @@ fn check_list_dir_cancelled(cancel_token: Option<&CancellationToken>) -> Result<
 }
 
 fn list_dir_cancelled() -> ToolError {
-    ToolError::execution_failed("list_dir cancelled before completion")
+    ToolError::cancelled("list_dir cancelled before completion")
 }
 
 fn list_dir_timeout(timeout: Duration) -> ToolError {

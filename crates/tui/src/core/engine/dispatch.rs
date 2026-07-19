@@ -18,7 +18,9 @@
 use serde_json::json;
 
 use crate::models::{Tool, ToolCaller};
-use crate::tools::spec::{ResourceClaim, ToolError, ToolResult, schedule_non_conflicting};
+use crate::tools::spec::{
+    ResourceClaim, ToolError, ToolExecutionOutcome, ToolResult, schedule_non_conflicting,
+};
 use crate::tui::app::AppMode;
 
 use super::ToolUseState;
@@ -32,7 +34,7 @@ pub(super) struct ToolExecOutcome {
     pub(super) name: String,
     pub(super) input: serde_json::Value,
     pub(super) started_at: std::time::Instant,
-    pub(super) result: Result<ToolResult, ToolError>,
+    pub(super) terminal: ToolExecutionOutcome,
 }
 
 #[derive(Debug, Clone)]
@@ -190,6 +192,7 @@ pub(super) fn format_tool_error_with_schema(
         ToolError::Timeout { seconds } => format!(
             "Tool '{tool_name}' timed out after {seconds}s. Try a narrower scope or a longer timeout."
         ),
+        ToolError::Cancelled { message } => message.clone(),
         ToolError::NotAvailable { message } => {
             let lower = message.to_ascii_lowercase();
             // #3020: Pass through self-explanatory messages that already name the

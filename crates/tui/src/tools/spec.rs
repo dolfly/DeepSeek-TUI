@@ -27,9 +27,9 @@ use crate::tools::shell::{SharedShellManager, new_shared_shell_manager};
 use crate::worker_profile::ShellPolicy;
 #[allow(unused_imports)]
 pub use codewhale_tools::{
-    ApprovalRequirement, PreparedToolCall, ResourceClaim, ToolCapability, ToolError, ToolResult,
-    optional_bool, optional_str, optional_u64, required_str, required_u64,
-    schedule_non_conflicting,
+    ApprovalRequirement, PreparedToolCall, ResourceClaim, ToolCapability, ToolError,
+    ToolExecutionOutcome, ToolResult, ToolTerminalStatus, optional_bool, optional_str,
+    optional_u64, required_str, required_u64, schedule_non_conflicting,
 };
 
 #[async_trait]

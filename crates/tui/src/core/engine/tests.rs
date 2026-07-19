@@ -2542,10 +2542,14 @@ fn tool_exec_outcome_tracks_duration() {
         name: "grep_files".to_string(),
         input: json!({"pattern": "test"}),
         started_at: Instant::now(),
-        result: Ok(ToolResult::success("ok")),
+        terminal: ToolExecutionOutcome::from_legacy(Ok(ToolResult::success("ok"))),
     };
 
     assert!(outcome.started_at.elapsed().as_nanos() > 0);
+    assert_eq!(
+        outcome.terminal.status,
+        crate::tools::spec::ToolTerminalStatus::Succeeded
+    );
 }
 
 #[test]
@@ -8481,6 +8485,7 @@ fn tool_failure_audit_payload_carries_category_and_severity() {
         "event": "tool.result",
         "tool_id": "tool-1",
         "tool_name": "exec_shell",
+        "status": ToolExecutionOutcome::from_legacy(Err(error.clone())).status.as_str(),
         "success": false,
         "error": error.to_string(),
         "category": envelope.category.to_string(),
@@ -8489,6 +8494,7 @@ fn tool_failure_audit_payload_carries_category_and_severity() {
 
     assert_eq!(payload["category"], "timeout");
     assert_eq!(payload["severity"], "warning");
+    assert_eq!(payload["status"], "timed_out");
     assert_eq!(payload["success"], false);
 }
 
