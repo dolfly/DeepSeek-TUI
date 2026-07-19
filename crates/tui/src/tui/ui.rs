@@ -10187,9 +10187,12 @@ async fn apply_command_result(
             },
             AppAction::TaskCancel { id } => {
                 match task_manager.cancel_task(&id).await {
-                    Ok(task) => {
+                    Ok(cancellation) => {
                         app.add_message(HistoryCell::System {
-                            content: format!("Task {} status: {:?}", task.id, task.status),
+                            content: format!(
+                                "Task {} status: {:?}",
+                                cancellation.task.id, cancellation.task.status
+                            ),
                         });
                     }
                     Err(err) => {

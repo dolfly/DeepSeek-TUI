@@ -633,6 +633,11 @@ struct ShellSpawnIntentGuard {
     armed: bool,
 }
 
+struct ShellSpawnContext {
+    owner_agent: Option<ShellJobOwner>,
+    work_lifecycle: Option<ShellWorkLifecycle>,
+}
+
 impl ShellSpawnIntentGuard {
     fn new(lifecycle: Option<ShellWorkLifecycle>, id: &str, command: &str) -> Result<Self> {
         if let Some(lifecycle) = lifecycle.as_ref() {
@@ -703,10 +708,11 @@ impl BackgroundShell {
         {
             return Ok(());
         }
-        self.lifecycle_seq = self.lifecycle_seq.saturating_add(1);
+        let next_seq = self.lifecycle_seq.saturating_add(1);
         if let Some(lifecycle) = self.work_lifecycle.as_ref() {
-            lifecycle.observe(&self.id, &self.status, self.lifecycle_seq, bytes)?;
+            lifecycle.observe(&self.id, &self.status, next_seq, bytes)?;
         }
+        self.lifecycle_seq = next_seq;
         self.last_lifecycle_status = Some(self.status.clone());
         self.last_lifecycle_bytes = bytes;
         Ok(())
@@ -1276,8 +1282,10 @@ impl ShellManager {
                 &exec_env,
                 stdin_data,
                 tty,
-                owner_agent,
-                work_lifecycle,
+                ShellSpawnContext {
+                    owner_agent,
+                    work_lifecycle,
+                },
             )
         } else {
             if tty {
@@ -1636,9 +1644,12 @@ impl ShellManager {
         exec_env: &ExecEnv,
         stdin_data: Option<&str>,
         tty: bool,
-        owner_agent: Option<ShellJobOwner>,
-        work_lifecycle: Option<ShellWorkLifecycle>,
+        spawn_context: ShellSpawnContext,
     ) -> Result<ShellResult> {
+        let ShellSpawnContext {
+            owner_agent,
+            work_lifecycle,
+        } = spawn_context;
         let task_id = format!("shell_{}", &Uuid::new_v4().to_string()[..8]);
         let mut spawn_guard =
             ShellSpawnIntentGuard::new(work_lifecycle.clone(), &task_id, original_command)?;
@@ -1811,11 +1822,11 @@ impl ShellManager {
             last_lifecycle_bytes: 0,
         };
 
-        if let Some(input) = stdin_data {
-            if let Err(err) = bg_shell.write_stdin(input, false) {
-                let _ = bg_shell.kill();
-                return Err(err);
-            }
+        if let Some(input) = stdin_data
+            && let Err(err) = bg_shell.write_stdin(input, false)
+        {
+            let _ = bg_shell.kill();
+            return Err(err);
         }
 
         if let Err(err) = bg_shell.publish_lifecycle() {
@@ -2849,6 +2860,7 @@ impl ToolSpec for ExecShellTool {
             });
         }
 
+        let mut lifecycle_warning = None;
         let result = if interactive {
             let mut manager = context
                 .shell_manager
@@ -2868,12 +2880,18 @@ impl ToolSpec for ExecShellTool {
             );
             match result {
                 Ok(result) => {
-                    if let Some(lifecycle) = work_lifecycle.as_ref() {
-                        lifecycle
-                            .observe(&task_id, &result.status, 1, 0)
-                            .map_err(|err| ToolError::execution_failed(err.to_string()))?;
-                    }
+                    // The process result is authoritative once execution has
+                    // completed. Disarm before observing it so a graph-write
+                    // failure cannot relabel a successful command as Failed.
                     spawn_guard.disarm();
+                    if let Some(lifecycle) = work_lifecycle.as_ref() {
+                        let raw_bytes = result.stdout_len.saturating_add(result.stderr_len);
+                        if let Err(err) = lifecycle.observe(&task_id, &result.status, 1, raw_bytes)
+                        {
+                            tracing::warn!(shell_id = %task_id, error = %err, "interactive shell completed but Work lifecycle reconciliation failed");
+                            lifecycle_warning = Some(err.to_string());
+                        }
+                    }
                     Ok(result)
                 }
                 Err(err) => Err(err),
@@ -3004,6 +3022,7 @@ impl ToolSpec for ExecShellTool {
                     "stderr_truncated": result.stderr_truncated,
                     "stdout_omitted": result.stdout_omitted,
                     "stderr_omitted": result.stderr_omitted,
+                    "lifecycle_warning": lifecycle_warning,
                     "summary": summary,
                     "stdout_summary": stdout_summary,
                     "stderr_summary": stderr_summary,

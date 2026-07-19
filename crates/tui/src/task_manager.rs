@@ -53,6 +53,23 @@ pub enum TaskStatus {
     Canceled,
 }
 
+/// What the manager actually did while handling a cancellation request.
+///
+/// This is returned from the same state-lock transaction as the task record,
+/// so callers never have to infer an outcome from a stale pre-cancel read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskCancelDisposition {
+    Forced,
+    Requested,
+    AlreadyFinished,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskCancellation {
+    pub task: TaskRecord,
+    pub disposition: TaskCancelDisposition,
+}
+
 impl TaskStatus {
     #[cfg(test)]
     #[must_use]
@@ -1011,13 +1028,13 @@ impl TaskManager {
     }
 
     /// Cancel a queued or running task by id/prefix.
-    pub async fn cancel_task(&self, id_or_prefix: &str) -> Result<TaskRecord> {
+    pub async fn cancel_task(&self, id_or_prefix: &str) -> Result<TaskCancellation> {
         let mut state = self.state.lock().await;
         let id = resolve_task_id(&state.tasks, id_or_prefix)?;
         let now = Utc::now();
 
         let mut cancel_running = false;
-        {
+        let disposition = {
             let task = state
                 .tasks
                 .get_mut(&id)
@@ -1035,6 +1052,7 @@ impl TaskManager {
                         detail_path: None,
                     });
                     state.queue.retain(|queued_id| queued_id != &id);
+                    TaskCancelDisposition::Forced
                 }
                 TaskStatus::Running => {
                     cancel_running = true;
@@ -1045,21 +1063,25 @@ impl TaskManager {
                         summary: "Cancellation requested".to_string(),
                         detail_path: None,
                     });
+                    TaskCancelDisposition::Requested
                 }
-                _ => {}
+                TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Canceled => {
+                    TaskCancelDisposition::AlreadyFinished
+                }
             }
-        }
+        };
 
         if cancel_running && let Some(token) = state.running_cancel.get(&id) {
             token.cancel();
         }
 
         self.persist_all_locked(&state)?;
-        state
+        let task = state
             .tasks
             .get(&id)
             .cloned()
-            .ok_or_else(|| anyhow!("Task not found: {id}"))
+            .ok_or_else(|| anyhow!("Task not found: {id}"))?;
+        Ok(TaskCancellation { task, disposition })
     }
 
     /// Return aggregate status counters.
@@ -2285,9 +2307,31 @@ mod tests {
             .await?;
 
         sleep(Duration::from_millis(10)).await;
-        let _ = manager.cancel_task(&task.id).await?;
+        let cancellation = manager.cancel_task(&task.id).await?;
+        assert_eq!(cancellation.disposition, TaskCancelDisposition::Requested);
         let finished = wait_for_terminal_state(&manager, &task.id, Duration::from_secs(10)).await?;
         assert_eq!(finished.status, TaskStatus::Canceled);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cancel_finished_task_returns_atomic_already_finished_outcome() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deepseek-task-test-{}", Uuid::new_v4()));
+        let manager =
+            TaskManager::start_with_executor(test_config(root), Arc::new(MockExecutor)).await?;
+        let task = manager
+            .add_task(NewTaskRequest::from_prompt("finish before cancellation"))
+            .await?;
+        let finished = wait_for_terminal_state(&manager, &task.id, Duration::from_secs(10)).await?;
+        assert_eq!(finished.status, TaskStatus::Completed);
+
+        let cancellation = manager.cancel_task(&task.id).await?;
+
+        assert_eq!(
+            cancellation.disposition,
+            TaskCancelDisposition::AlreadyFinished
+        );
+        assert_eq!(cancellation.task.status, TaskStatus::Completed);
         Ok(())
     }
 

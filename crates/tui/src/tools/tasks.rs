@@ -13,7 +13,8 @@ use uuid::Uuid;
 use crate::command_safety::{SafetyLevel, analyze_command};
 use crate::dependencies::ExternalTool;
 use crate::task_manager::{
-    NewTaskRequest, TaskArtifactRef, TaskAttemptRecord, TaskGateRecord, TaskRecord, TaskStatus,
+    NewTaskRequest, TaskArtifactRef, TaskAttemptRecord, TaskCancelDisposition, TaskGateRecord,
+    TaskRecord, TaskStatus,
 };
 use crate::tools::shell::{ExecShellTool, ShellWaitTool};
 use crate::tools::spec::{
@@ -142,8 +143,11 @@ impl ToolSpec for TaskCreateTool {
                 return Err(ToolError::execution_failed(err.to_string()));
             }
         };
-        reconcile_task_record(context, &task)?;
-        task_result("task_create", &task)
+        let lifecycle_warning = reconcile_task_record(context, &task).err().map(|err| {
+            tracing::warn!(task_id = %task.id, error = %err, "task was created but Work lifecycle reconciliation failed");
+            err.to_string()
+        });
+        task_result_with_lifecycle_warning("task_create", &task, lifecycle_warning.as_deref())
     }
 }
 
@@ -269,25 +273,21 @@ impl ToolSpec for TaskCancelTool {
             .task_manager
             .as_ref()
             .ok_or_else(|| ToolError::not_available("TaskManager is not attached"))?;
-        let prior = manager
-            .get_task(required_str(&input, "task_id")?)
-            .await
-            .map_err(|e| ToolError::execution_failed(e.to_string()))?;
-        let task = manager
+        let cancellation = manager
             .cancel_task(required_str(&input, "task_id")?)
             .await
             .map_err(|e| ToolError::execution_failed(e.to_string()))?;
-        let cancel_outcome = match prior.status {
-            TaskStatus::Queued => CancelOutcome::Forced,
-            TaskStatus::Running => CancelOutcome::Requested,
-            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Canceled => {
-                CancelOutcome::AlreadyFinished
-            }
+        let task = cancellation.task;
+        let cancel_outcome = match cancellation.disposition {
+            TaskCancelDisposition::Forced => CancelOutcome::Forced,
+            TaskCancelDisposition::Requested => CancelOutcome::Requested,
+            TaskCancelDisposition::AlreadyFinished => CancelOutcome::AlreadyFinished,
         };
+        let mut lifecycle_warnings = Vec::new();
         if let Some(work) = context.runtime.work.as_ref() {
             let external = format!("task:{}", task.id);
-            if work.has_operation_binding(Some(&context.state_namespace), &external) {
-                work.reconcile_observation(
+            if work.has_operation_binding(Some(&context.state_namespace), &external)
+                && let Err(err) = work.reconcile_observation(
                     &context.state_namespace,
                     &external,
                     OperationObservation::CancelUpdate {
@@ -295,11 +295,18 @@ impl ToolSpec for TaskCancelTool {
                         at: Utc::now().timestamp_millis(),
                     },
                 )
-                .map_err(ToolError::execution_failed)?;
+            {
+                tracing::warn!(task_id = %task.id, error = %err, "task was cancelled but Work cancel reconciliation failed");
+                lifecycle_warnings.push(err);
             }
         }
-        reconcile_task_record(context, &task)?;
-        task_result("task_cancel", &task)
+        if let Err(err) = reconcile_task_record(context, &task) {
+            tracing::warn!(task_id = %task.id, error = %err, "task cancellation succeeded but owner-state reconciliation failed");
+            lifecycle_warnings.push(err.to_string());
+        }
+        let lifecycle_warning =
+            (!lifecycle_warnings.is_empty()).then(|| lifecycle_warnings.join("; "));
+        task_result_with_lifecycle_warning("task_cancel", &task, lifecycle_warning.as_deref())
     }
 }
 
@@ -889,9 +896,18 @@ impl ToolSpec for PrAttemptPreflightTool {
 }
 
 fn task_result(label: &str, task: &TaskRecord) -> Result<ToolResult, ToolError> {
+    task_result_with_lifecycle_warning(label, task, None)
+}
+
+fn task_result_with_lifecycle_warning(
+    label: &str,
+    task: &TaskRecord,
+    lifecycle_warning: Option<&str>,
+) -> Result<ToolResult, ToolError> {
     ToolResult::json(&json!({
         "summary": format!("{label}: {} ({:?})", task.id, task.status),
         "task": task,
+        "lifecycle_warning": lifecycle_warning,
     }))
     .map_err(|e| ToolError::execution_failed(e.to_string()))
 }
