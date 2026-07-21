@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 use qa_harness::harness::{Harness, make_sealed_workspace};
 use qa_harness::keys;
+use unicode_width::UnicodeWidthStr;
 
 const BOOT_TIMEOUT: Duration = Duration::from_secs(15);
 const KEY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -210,6 +211,182 @@ fn assert_viewport_starts_at_top(frame: &qa_harness::Frame) {
     );
 }
 
+fn visible_row_with_text(frame: &qa_harness::Frame, needle: &str) -> Option<u16> {
+    (0..frame.rows()).find(|&row| frame.row(row).contains(needle))
+}
+
+fn foreground_at_text(frame: &qa_harness::Frame, row: u16, needle: &str) -> vt100::Color {
+    let col = frame
+        .find_text_in_row(row, needle)
+        .unwrap_or_else(|| panic!("{needle:?} missing from row {row}: {:?}", frame.row(row)));
+    frame
+        .colors_at(row, col)
+        .unwrap_or_else(|| panic!("missing terminal cell at ({row}, {col})"))
+        .0
+}
+
+fn composer_edge_rows(frame: &qa_harness::Frame, placeholder: &str) -> (u16, u16) {
+    let input_row = visible_row_with_text(frame, placeholder)
+        .unwrap_or_else(|| panic!("composer placeholder {placeholder:?} missing"));
+    let minimum_rule_cells = usize::from(frame.cols() / 2);
+    let is_rule = |row: u16| {
+        frame
+            .row(row)
+            .chars()
+            .filter(|ch| {
+                matches!(
+                    ch,
+                    '-' | '─' | '━' | '╌' | '╍' | '┄' | '┅' | '┈' | '┉' | '═'
+                )
+            })
+            .count()
+            >= minimum_rule_cells
+    };
+    let top = (0..input_row)
+        .rev()
+        .find(|&row| is_rule(row))
+        .expect("composer top edge");
+    let bottom = (input_row.saturating_add(1)..frame.rows())
+        .find(|&row| is_rule(row))
+        .expect("composer bottom edge");
+    (top, bottom)
+}
+
+/// Assert the user-visible labels and the split composer edges tell the same
+/// agency/permission story in the ANSI cells emitted through the real PTY.
+fn assert_control_grammar(
+    frame: &qa_harness::Frame,
+    mode: &str,
+    permission: &str,
+    placeholder: &str,
+) -> (vt100::Color, vt100::Color) {
+    let dump = frame.debug_dump();
+    let header = frame.row(0);
+    assert!(
+        header.contains(mode),
+        "mode {mode:?} missing from header {header:?}:\n{dump}"
+    );
+    assert!(
+        header.contains(permission),
+        "permission {permission:?} missing from header {header:?}:\n{dump}"
+    );
+    let mode_color = foreground_at_text(frame, 0, mode);
+    let permission_color = foreground_at_text(frame, 0, permission);
+    let (permission_edge, mode_edge) = composer_edge_rows(frame, placeholder);
+    assert_eq!(
+        frame
+            .colors_at(permission_edge, 1)
+            .expect("permission edge cell")
+            .0,
+        permission_color,
+        "header permission and composer top edge diverged:\n{dump}"
+    );
+    assert_eq!(
+        frame.colors_at(mode_edge, 1).expect("mode edge cell").0,
+        mode_color,
+        "header mode and composer bottom edge diverged:\n{dump}"
+    );
+    (mode_color, permission_color)
+}
+
+fn assert_real_pty_frame_geometry(frame: &qa_harness::Frame, cols: u16, rows: u16) {
+    let dump = frame.debug_dump();
+    assert_eq!(frame.cols(), cols, "parsed PTY width changed:\n{dump}");
+    assert_eq!(frame.rows(), rows, "parsed PTY height changed:\n{dump}");
+    let (cursor_row, cursor_col) = frame.cursor();
+    assert!(
+        cursor_row < rows && cursor_col < cols,
+        "cursor escaped {cols}x{rows}: ({cursor_row}, {cursor_col})\n{dump}"
+    );
+    for row in 0..rows {
+        let width = UnicodeWidthStr::width(frame.row(row).as_str());
+        assert!(
+            width <= usize::from(cols),
+            "row {row} clips at width {width} in {cols}x{rows}:\n{dump}"
+        );
+    }
+    for fatal in [
+        "panicked at",
+        "fatal runtime error",
+        "thread 'main' panicked",
+    ] {
+        assert!(!frame.contains(fatal), "TUI exposed {fatal:?}:\n{dump}");
+    }
+}
+
+fn assert_empty_state_hierarchy(frame: &qa_harness::Frame, ascii_safe: bool) {
+    let dump = frame.debug_dump();
+    let context = visible_row_with_text(frame, "codewhale").expect("empty-state context row");
+    let composer = visible_row_with_text(frame, COMPOSER_READY_TEXT).expect("composer row");
+    assert!(
+        context < composer,
+        "empty-state facts must precede the composer:\n{dump}"
+    );
+    if let Some(fleet) = visible_row_with_text(frame, "Fleet ready") {
+        assert!(
+            context < fleet && fleet < composer,
+            "Fleet action must follow context and precede the composer:\n{dump}"
+        );
+        if let Some(help) = visible_row_with_text(frame, "/help") {
+            assert!(
+                fleet < help && help < composer,
+                "optional help must follow Fleet and precede the composer:\n{dump}"
+            );
+        }
+    } else {
+        assert!(
+            frame.rows() <= 12,
+            "only the 12-row compact tier may shed the Fleet action:\n{dump}"
+        );
+    }
+
+    let whale_row = (2..context).find(|&row| {
+        let text = frame.row(row);
+        if ascii_safe {
+            text.chars().filter(|ch| *ch == '#').count() >= 8
+        } else {
+            text.chars()
+                .filter(|ch| {
+                    matches!(
+                        ch,
+                        '█' | '▄' | '▀' | '▗' | '▖' | '▙' | '▝' | '▚' | '▞' | '▐'
+                    )
+                })
+                .count()
+                >= 8
+        }
+    });
+    if frame.cols() >= 80 && frame.rows() >= 24 {
+        assert!(
+            whale_row.is_some(),
+            "idle whale missing where the terminal earns decorative water:\n{dump}"
+        );
+    }
+    if let Some(row) = whale_row {
+        assert!(
+            row < context,
+            "idle whale must yield before functional empty-state facts:\n{dump}"
+        );
+    }
+}
+
+fn write_real_pty_evidence(
+    name: &str,
+    metadata: &str,
+    frame: &qa_harness::Frame,
+) -> anyhow::Result<()> {
+    let Some(dir) = std::env::var_os("CODEWHALE_QA_EVIDENCE_DIR") else {
+        return Ok(());
+    };
+    let dir = std::path::PathBuf::from(dir);
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join(format!("v091-{name}.txt")),
+        format!("real_pty=true\n{metadata}\n\n{}", frame.debug_dump()),
+    )?;
+    Ok(())
+}
+
 /// Smoke: the binary boots into an alt-screen, paints a composer, and the
 /// header shows the project label. If this fails, the harness itself is
 /// broken before we worry about any scenario.
@@ -228,6 +405,228 @@ fn smoke_boot_paints_composer() -> anyhow::Result<()> {
     );
 
     let _ = h.shutdown();
+    Ok(())
+}
+
+/// v0.9.1 visual stopship: exercise the shipped shell through a real PTY at
+/// every release evidence size. This is parsed terminal output, not a test
+/// renderer or generated product image.
+#[test]
+fn v091_real_pty_visual_matrix_preserves_control_grammar() -> anyhow::Result<()> {
+    let _guard = qa_pty_test_lock();
+    let cases = [
+        (40_u16, 12_u16, "terminal", false),
+        (60, 16, "grayscale", false),
+        (80, 24, "dark", true),
+        (100, 32, "light", false),
+        (140, 40, "dark", false),
+    ];
+    let mut theme_signatures = Vec::<(&str, String)>::new();
+
+    for (cols, rows, theme, ascii_safe) in cases {
+        let ws = make_sealed_workspace()?;
+        let codewhale_home = ws.home().join(".codewhale");
+        let codex_home = ws.home().join(".codex");
+        std::fs::create_dir_all(&codex_home)?;
+        std::fs::write(
+            codewhale_home.join("config.toml"),
+            "reasoning_effort = \"low\"\n\n[update]\ncheck_for_updates = false\n",
+        )?;
+        std::fs::write(
+            codewhale_home.join("settings.toml"),
+            format!(
+                "theme = \"{theme}\"\nlocale = \"en\"\ndefault_mode = \"agent\"\npermission_posture = \"ask\"\nlow_motion = false\nfancy_animations = true\ncomposer_border = true\n"
+            ),
+        )?;
+        std::fs::write(
+            codex_home.join("models_cache.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "fetched_at": chrono::Utc::now(),
+                "models": [{"slug": "gpt-pty-fixture", "priority": 1}]
+            }))?,
+        )?;
+
+        let mut builder = Harness::builder(Harness::cargo_bin("codewhale-tui"))
+            .cwd(ws.workspace())
+            .clear_env()
+            .seal_home(ws.home())
+            .env("CODEWHALE_HOME", codewhale_home.to_string_lossy())
+            .env(
+                "DEEPSEEK_CONFIG_PATH",
+                codewhale_home.join("config.toml").to_string_lossy(),
+            )
+            .env("CODEX_HOME", codex_home.to_string_lossy())
+            .env("DEEPSEEK_API_KEY", "ci-test-key-not-real")
+            .env("DEEPSEEK_BASE_URL", "http://127.0.0.1:1")
+            // This runtime overlay must win over the saved animation opt-in.
+            .env("NO_ANIMATIONS", "1")
+            .env("RUST_LOG", "warn")
+            .args([
+                "--workspace",
+                ws.workspace().to_str().expect("utf-8 workspace path"),
+                "--no-project-config",
+                "--skip-onboarding",
+            ])
+            .size(rows, cols);
+        if ascii_safe {
+            builder = builder.env("CODEWHALE_ASCII_SAFE", "1");
+        }
+        let mut h = builder.spawn()?;
+        enter_launch_session(&mut h)?;
+        h.wait_for_idle(Duration::from_millis(300), Duration::from_secs(3))?;
+
+        let first = h.frame().text();
+        // Motion evidence needs two real frames separated in wall-clock time.
+        std::thread::sleep(Duration::from_millis(450));
+        h.pump();
+        let second = h.frame().text();
+        assert_eq!(
+            first, second,
+            "NO_ANIMATIONS frame moved at {cols}x{rows} ({theme})"
+        );
+
+        {
+            let frame = h.frame();
+            let dump = frame.debug_dump();
+            assert_real_pty_frame_geometry(frame, cols, rows);
+            assert_empty_state_hierarchy(frame, ascii_safe);
+            assert_control_grammar(frame, "act", "ask", COMPOSER_READY_TEXT);
+            if ascii_safe {
+                assert!(
+                    frame.text().is_ascii(),
+                    "ASCII-safe PTY emitted non-ASCII cells:\n{dump}"
+                );
+            }
+
+            let signature = format!("{:?}", frame.colors_at(0, 0).expect("header mark cell"));
+            if let Some((_, previous)) = theme_signatures
+                .iter()
+                .find(|(previous_theme, _)| *previous_theme == theme)
+            {
+                assert_eq!(
+                    &signature, previous,
+                    "theme {theme} changed ANSI signature with terminal size"
+                );
+            } else {
+                for (previous_theme, previous) in &theme_signatures {
+                    assert_ne!(
+                        &signature, previous,
+                        "themes {previous_theme} and {theme} emitted the same ANSI signature"
+                    );
+                }
+                theme_signatures.push((theme, signature));
+            }
+            write_real_pty_evidence(
+                &format!(
+                    "matrix-{theme}-{cols}x{rows}{}",
+                    if ascii_safe { "-ascii" } else { "" }
+                ),
+                &format!(
+                    "size={cols}x{rows}\ntheme={theme}\nmode=act\npermission=ask\nreduced_motion=true\nascii_safe={ascii_safe}"
+                ),
+                frame,
+            )?;
+        }
+
+        // The widest dark terminal also proves the cool agency ramp and warm
+        // permission ramp end to end. Header labels and split composer edges
+        // must change together, and each state must retain its own ANSI color.
+        if cols == 140 {
+            let (act, ask) = assert_control_grammar(h.frame(), "act", "ask", COMPOSER_READY_TEXT);
+
+            h.send(b"\t")?;
+            h.wait_for(
+                |frame| {
+                    frame.row(0).contains("operate") && frame.contains("Coordinate parallel tasks")
+                },
+                KEY_TIMEOUT,
+            )?;
+            let (operate, _) =
+                assert_control_grammar(h.frame(), "operate", "ask", "Coordinate parallel tasks");
+            write_real_pty_evidence(
+                "agency-operate-140x40",
+                "size=140x40\ntheme=dark\nmode=operate\npermission=ask\nreduced_motion=true\nascii_safe=false",
+                h.frame(),
+            )?;
+
+            h.send(b"\t")?;
+            h.wait_for(
+                |frame| {
+                    frame.row(0).contains("plan")
+                        && frame.row(0).contains("read only")
+                        && frame.contains(COMPOSER_READY_TEXT)
+                },
+                KEY_TIMEOUT,
+            )?;
+            let (plan, _) =
+                assert_control_grammar(h.frame(), "plan", "read only", COMPOSER_READY_TEXT);
+            write_real_pty_evidence(
+                "agency-plan-140x40",
+                "size=140x40\ntheme=dark\nmode=plan\npermission=read-only\nreduced_motion=true\nascii_safe=false",
+                h.frame(),
+            )?;
+            assert_ne!(plan, act, "Plan and Act collapsed to one ANSI color");
+            assert_ne!(
+                plan, operate,
+                "Plan and Operate collapsed to one ANSI color"
+            );
+            assert_ne!(act, operate, "Act and Operate collapsed to one ANSI color");
+
+            h.send(b"\t")?;
+            h.wait_for(
+                |frame| {
+                    frame.row(0).contains("act")
+                        && frame.row(0).contains("ask")
+                        && frame.contains(COMPOSER_READY_TEXT)
+                },
+                KEY_TIMEOUT,
+            )?;
+            assert_control_grammar(h.frame(), "act", "ask", COMPOSER_READY_TEXT);
+
+            h.send(keys::key::backtab())?;
+            h.wait_for(
+                |frame| frame.row(0).contains("act") && frame.row(0).contains("auto"),
+                KEY_TIMEOUT,
+            )?;
+            let (_, auto) = assert_control_grammar(h.frame(), "act", "auto", COMPOSER_READY_TEXT);
+            write_real_pty_evidence(
+                "permission-auto-140x40",
+                "size=140x40\ntheme=dark\nmode=act\npermission=auto\nreduced_motion=true\nascii_safe=false",
+                h.frame(),
+            )?;
+
+            h.send(keys::key::backtab())?;
+            h.wait_for(
+                |frame| frame.row(0).contains("act") && frame.row(0).contains("Full Access"),
+                KEY_TIMEOUT,
+            )?;
+            let (_, full_access) =
+                assert_control_grammar(h.frame(), "act", "Full Access", COMPOSER_READY_TEXT);
+            write_real_pty_evidence(
+                "permission-full-access-140x40",
+                "size=140x40\ntheme=dark\nmode=act\npermission=full-access\nreduced_motion=true\nascii_safe=false",
+                h.frame(),
+            )?;
+            assert_ne!(ask, auto, "Ask and Auto collapsed to one ANSI color");
+            assert_ne!(
+                ask, full_access,
+                "Ask and Full Access collapsed to one ANSI color"
+            );
+            assert_ne!(
+                auto, full_access,
+                "Auto and Full Access collapsed to one ANSI color"
+            );
+        }
+
+        if let Some(status) = h.wait_for_exit(Duration::from_millis(1)) {
+            return Err(anyhow::anyhow!(
+                "TUI exited during {cols}x{rows} {theme} matrix case with {status}:\n{}",
+                h.debug_dump()
+            ));
+        }
+        let _ = h.shutdown();
+    }
+
     Ok(())
 }
 

@@ -71,10 +71,49 @@ impl Frame {
     /// instead of hard-coding layout coordinates.
     pub fn find_text(&self, needle: &str) -> Option<(u16, u16)> {
         for row in 0..self.rows() {
-            let text = self.row(row);
-            if let Some(byte) = text.find(needle) {
-                let col = unicode_width::UnicodeWidthStr::width(&text[..byte]);
-                return Some((row, u16::try_from(col).ok()?));
+            if let Some(col) = self.find_text_in_row(row, needle) {
+                return Some((row, col));
+            }
+        }
+        None
+    }
+
+    /// Locate text on one parsed terminal row without collapsing blank cells.
+    /// `vt100::Cell::contents()` is empty for untouched spaces, which matters
+    /// for transparent themes whose styled gaps do not need to be emitted.
+    pub fn find_text_in_row(&self, row: u16, needle: &str) -> Option<u16> {
+        if row >= self.rows() || needle.is_empty() {
+            return None;
+        }
+        for start in 0..self.cols() {
+            let mut col = start;
+            let mut matched = true;
+            for ch in needle.chars() {
+                let Some(cell) = self.parser.screen().cell(row, col) else {
+                    matched = false;
+                    break;
+                };
+                let contents = cell.contents();
+                let mut encoded = [0_u8; 4];
+                let expected = ch.encode_utf8(&mut encoded);
+                if if ch == ' ' {
+                    !contents.is_empty() && contents != " "
+                } else {
+                    contents != expected
+                } {
+                    matched = false;
+                    break;
+                }
+                let width = unicode_width::UnicodeWidthChar::width(ch)
+                    .unwrap_or(0)
+                    .max(1);
+                let Ok(width) = u16::try_from(width) else {
+                    return None;
+                };
+                col = col.saturating_add(width);
+            }
+            if matched {
+                return Some(start);
             }
         }
         None

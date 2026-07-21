@@ -23,6 +23,11 @@ pub mod key {
         b"\x1b[B".to_vec()
     }
 
+    /// Shift+Tab as the xterm BackTab sequence accepted by crossterm.
+    pub fn backtab() -> Vec<u8> {
+        b"\x1b[Z".to_vec()
+    }
+
     pub fn page_up() -> Vec<u8> {
         b"\x1b[5~".to_vec()
     }
