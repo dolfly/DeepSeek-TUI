@@ -829,7 +829,7 @@ impl TasksTool {
         .map_err(|e| ToolError::execution_failed(format!("git apply --check failed: {e}")))?;
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-        Ok(ToolResult::json(&json!({
+        ToolResult::json(&json!({
             "attempt_id": attempt_id,
             "patch_path": patch_ref,
             "would_apply": out.status.success(),
@@ -838,7 +838,7 @@ impl TasksTool {
             "stderr_summary": summarize(&stderr, MAX_SUMMARY_CHARS),
             "mutated_worktree": false
         }))
-        .map_err(|e| ToolError::execution_failed(e.to_string()))?)
+        .map_err(|e| ToolError::execution_failed(e.to_string()))
     }
 }
 

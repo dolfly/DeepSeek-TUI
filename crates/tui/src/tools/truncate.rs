@@ -324,10 +324,10 @@ fn apply_spillover_inner(
     tool_id: &str,
     artifact_context: Option<ArtifactSpilloverContext<'_>>,
 ) -> Option<PathBuf> {
-    if artifact_context.is_some()
-        && !crate::tools::large_output_router::classic_output_routing_enabled()
+    if !crate::tools::large_output_router::classic_output_routing_enabled()
+        && let Some(context) = artifact_context
     {
-        return apply_adaptive_evidence_inner(result, tool_id, artifact_context.unwrap());
+        return apply_adaptive_evidence_inner(result, tool_id, context);
     }
     if !result.success {
         return None;

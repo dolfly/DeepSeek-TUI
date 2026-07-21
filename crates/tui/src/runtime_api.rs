@@ -3457,20 +3457,6 @@ fn persist_runtime_tui_setting(key: &str, value: &str) -> Result<(), ApiError> {
         .map_err(|e| ApiError::internal(format!("Failed to save settings: {e}")))
 }
 
-fn persisted_or_active_provider(state: &RuntimeApiState) -> ApiProvider {
-    if let Ok(config) = Config::load(state.config_path.clone(), None) {
-        return config.api_provider();
-    }
-    state.config.read().api_provider()
-}
-
-fn effective_model_for_provider(config: &Config, provider: ApiProvider) -> String {
-    if provider == config.api_provider() {
-        return config.default_model();
-    }
-    provider_default_model_for_api(config, config.api_provider(), provider)
-}
-
 /// Response for `POST /v1/config/reload`.
 #[derive(Debug, Serialize)]
 struct ReloadConfigResponse {

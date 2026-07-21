@@ -393,11 +393,12 @@ fn user_constitution_disabled_by_setup_state() -> bool {
 // and ordering invariants (constitution structure and binding gates #4032,
 // byte-stable prefix ordering, prefix privacy #4632).
 pub use text::{
-    AGENT_MODE, AGENT_PROMPT, AUTO_APPROVAL, BASE_PROMPT, CALM_PERSONALITY, COMPACT_TEMPLATE,
-    CORE_EXECUTION_PROFILE_PROMPT, GOAL_CONTINUATION_PROMPT, LANGUAGE_PROMPT, MEMORY_GUIDANCE,
-    NEVER_APPROVAL, OPERATE_MODE, OUTPUT_PROMPT, PLAN_MODE, PLAYFUL_PERSONALITY, SUGGEST_APPROVAL,
-    YOLO_MODE,
+    AGENT_MODE, BASE_PROMPT, CALM_PERSONALITY, COMPACT_TEMPLATE, CORE_EXECUTION_PROFILE_PROMPT,
+    GOAL_CONTINUATION_PROMPT, LANGUAGE_PROMPT, MEMORY_GUIDANCE, OPERATE_MODE, OUTPUT_PROMPT,
+    PLAN_MODE, PLAYFUL_PERSONALITY,
 };
+#[cfg(test)]
+use text::{AGENT_PROMPT, AUTO_APPROVAL, NEVER_APPROVAL, SUGGEST_APPROVAL, YOLO_MODE};
 
 // ── Embedder prompt overrides ──
 // Let an embedder replace these compile-time prompt constants at startup,

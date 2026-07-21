@@ -443,7 +443,7 @@ fn agent_rows(app: &App) -> Vec<RankedWorkRow> {
         .iter()
         .filter(|(id, _)| !cached_ids.contains(id.as_str()))
         .collect::<Vec<_>>();
-    progress_only.sort_by(|(left, _), (right, _)| left.cmp(right));
+    progress_only.sort_by_key(|(id, _)| (*id).clone());
     rows.extend(
         progress_only
             .into_iter()

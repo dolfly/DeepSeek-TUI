@@ -1014,7 +1014,7 @@ impl ModalView for FleetSetupView {
                     .iter()
                     .map(|idx| self.model_choices[*idx].clone())
                     .collect();
-                let selected = self.model_idx.min(filtered.len().saturating_sub(1)).max(0);
+                let selected = self.model_idx.min(filtered.len().saturating_sub(1));
                 let filter_line = if self.model_filter_active {
                     format!("Filter: {}▏ (Enter keep · Esc clear)", self.model_query)
                 } else if !self.model_query.trim().is_empty() {

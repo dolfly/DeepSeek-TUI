@@ -1088,7 +1088,7 @@ fn sanitize_prompt_path_text(text: &str, workspace: &Path) -> String {
         && let Some(home_str) = home.to_str()
         && !home_str.is_empty()
     {
-        out = out.replace(&home_str, "~");
+        out = out.replace(home_str, "~");
     }
     out
 }
