@@ -2441,10 +2441,12 @@ fn permission_postures_persist_across_restart() {
             assert!(app.cycle_approval_posture());
         }
         assert_eq!(app.approval_mode, expected);
+        assert_eq!(app.trust_mode, expected == ApprovalMode::Bypass);
 
         let restarted = App::new(options, &Config::default());
         assert_eq!(restarted.approval_mode, expected);
         assert_eq!(restarted.mode_prefs.agent_approval_mode, expected);
+        assert_eq!(restarted.trust_mode, expected == ApprovalMode::Bypass);
         drop(config_env);
     }
 }

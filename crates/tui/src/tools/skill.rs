@@ -10,19 +10,12 @@
 //! would blow the prompt budget the moment a user has half a dozen
 //! skills installed.
 //!
-//! Two paths exist for the model to actually read a native skill:
-//!
-//! 1. The existing progressive-disclosure pattern: model spots a
-//!    skill in the catalogue, calls `read_file <path>` from the
-//!    listing.
-//! 2. (this tool) `load_skill name=<id>` — single call, name-based
-//!    lookup, also enumerates the sibling files in the skill's
-//!    directory so the model sees the companion resources without
-//!    a separate `list_dir`.
-//!
-//! Both are valid for native skills. Reviewed plugin skills are exposed only
-//! through this tool's content-bound in-memory snapshot; their mutable source
-//! paths and companion files are deliberately not returned.
+//! `load_skill name=<id>` is the canonical progressive-disclosure path. It
+//! performs a name-based host lookup, so native global skills work without
+//! widening the model's workspace file authority, and it enumerates companion
+//! files without a separate `list_dir`. Reviewed plugin skills are exposed
+//! only through this tool's content-bound in-memory snapshot; their mutable
+//! source paths and companion files are deliberately not returned.
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -559,6 +552,46 @@ mod tests {
             msg.contains("claude-only") && msg.contains("codewhale-only"),
             "error should name the missing skill and available strict catalog: {msg}"
         );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn execute_loads_global_codewhale_skill_without_workspace_trust() {
+        let _env_lock = crate::test_support::lock_test_env();
+        let tmp = tempdir().unwrap();
+        let workspace = tmp.path().join("workspace");
+        let home = tmp.path().join("home");
+        let global_skills = home.join(".codewhale/skills");
+        fs::create_dir_all(&workspace).unwrap();
+        write_skill(
+            &global_skills,
+            "global-helper",
+            "Global helper",
+            "Global body marker.",
+        );
+        let _home = crate::test_support::EnvVarGuard::set("HOME", &home);
+        let _user_profile = crate::test_support::EnvVarGuard::set("USERPROFILE", &home);
+
+        let context = ToolContext::new(&workspace);
+        assert!(!context.trust_mode);
+        assert!(
+            context
+                .resolve_path(
+                    global_skills
+                        .join("global-helper/SKILL.md")
+                        .to_str()
+                        .unwrap()
+                )
+                .is_err(),
+            "ordinary file tools must retain the workspace boundary"
+        );
+
+        let result = LoadSkillTool
+            .execute(json!({"name": "global-helper"}), &context)
+            .await
+            .expect("load_skill host lookup should open ~/.codewhale/skills");
+        assert!(result.success);
+        assert!(result.content.contains("Global body marker."));
     }
 
     #[tokio::test]

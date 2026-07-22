@@ -3329,13 +3329,14 @@ impl App {
         let configured_approval_mode = explicit_approval_mode
             .or(saved_permission_posture)
             .unwrap_or_default();
+        let configured_trust_mode = configured_approval_mode == ApprovalMode::Bypass;
         let mode_prefs = ModeSessionPrefs {
             agent_allow_shell: if yolo_compat || matches!(initial_mode, AppMode::Yolo) {
                 config.interactive_allow_shell()
             } else {
                 allow_shell
             },
-            agent_trust_mode: false,
+            agent_trust_mode: configured_trust_mode,
             // The YOLO-compat launch elevates the *live* approval mirror to
             // Bypass below; the durable Agent baseline keeps the configured
             // policy so a YOLO -> Agent downshift restores it.
@@ -3613,7 +3614,7 @@ impl App {
             last_known_work_state: None,
             current_session_metadata: None,
             session_artifacts: Vec::new(),
-            trust_mode: yolo_compat || initial_mode == AppMode::Yolo,
+            trust_mode: yolo_compat || initial_mode == AppMode::Yolo || configured_trust_mode,
             translation_enabled: false,
             status_items: config
                 .tui
@@ -4206,14 +4207,19 @@ impl App {
         );
     }
 
-    /// Update the durable Act approval choice without changing its saved shell
-    /// or trust choices. Plan remains read-only.
+    /// Update the durable Act approval choice. Entering Full Access enables
+    /// trust mode; leaving it removes that implicit elevation while preserving
+    /// an independently enabled trust baseline in other posture transitions.
+    /// Plan remains read-only.
     pub fn set_agent_approval_posture(&mut self, next: ApprovalMode) {
-        self.set_agent_runtime_baseline(
-            self.mode_prefs.agent_allow_shell,
-            self.mode_prefs.agent_trust_mode,
-            next,
-        );
+        let trust_mode = if next == ApprovalMode::Bypass {
+            true
+        } else if self.mode_prefs.agent_approval_mode == ApprovalMode::Bypass {
+            false
+        } else {
+            self.mode_prefs.agent_trust_mode
+        };
+        self.set_agent_runtime_baseline(self.mode_prefs.agent_allow_shell, trust_mode, next);
     }
 
     #[must_use]

@@ -1165,7 +1165,7 @@ reviewed plugin snapshots must be opened with `load_skill`.\n\n",
 
     out.push_str(
         "\n### How to use skills\n\
-- Native skill bodies live on disk at the listed paths. For a reviewed plugin snapshot, use `load_skill` and do not read its mutable source path directly.\n\
+- Use `load_skill` to open any skill body by name. This is required for reviewed plugin snapshots and is the preferred path for native skills, including global skills outside the workspace. Direct file reads retain the normal workspace/trust boundary.\n\
 - Trigger rules: use a skill when the user names it (`$SkillName`, `/skill <name>`, or plain text) or the task clearly matches its description. Do not carry skills across turns unless re-mentioned.\n\
 - Missing/blocked: if a named skill is missing or cannot be read, say so briefly and continue with the best fallback.\n\
 - Safety: do not execute scripts from a community skill unless the user explicitly asks or the skill has been trusted for script use.\n",
@@ -1231,6 +1231,8 @@ mod tests {
 
         assert!(rendered.contains("## Skills"));
         assert!(rendered.contains("- test-skill: A test skill"));
+        assert!(rendered.contains("Use `load_skill` to open any skill body by name"));
+        assert!(rendered.contains("Direct file reads retain the normal workspace/trust boundary"));
         assert!(
             rendered.contains(&expected_path),
             "expected path {expected_path:?} not in rendered output"
