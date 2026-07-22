@@ -113,6 +113,16 @@ worker for every executable step. Workflow is an optional orchestration overlay
 for work that needs ordering, gates, shared budgets, replay, or deterministic
 fan-in.
 
+The short public vocabulary is:
+
+- **Fleet** = who does the work: the configured workers, roles, models, hosts,
+  and trust boundaries.
+- **Workflow** = what order the work follows: phases, gates, budgets, replay,
+  and fan-in.
+- **Lane** = one running Workflow instance and its live progress.
+- **Runtime** = where and how a Lane executes: local or remote process,
+  provider route, sandbox, and API boundary.
+
 - **Workflow** is the repeatable plan and user-facing orchestration
   overlay: a script/IR that decides which phases and agents run next, keeps
   intermediate results out of the main conversation, and can be inspected or

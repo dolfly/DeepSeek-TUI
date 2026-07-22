@@ -289,7 +289,7 @@ Supported keys in the project overlay (top-level fields only):
 |---|---|
 | `model` | override `default_text_model` |
 | `reasoning_effort` | force `"high"` / `"max"` for a complex repo |
-| `approval_policy` | only values that tighten the user's current approval posture |
+| `approval_policy` | only values that tighten the user's current permission posture |
 | `sandbox_mode` | only values that tighten the user's current sandbox posture |
 | `notes_path` | keep notes in-repo |
 | `max_subagents` | clamp sub-agent concurrency for a constrained repo (clamped to 1..=20) |
@@ -1343,7 +1343,7 @@ If you are upgrading from older releases:
   action = "session.compact"
   ```
 - `[auto_review]` (table, optional): deterministic tool-call review policy.
-  This layer sits on top of existing approval modes; it can hold or block a
+  This layer sits on top of the existing permission posture; it can hold or block a
   tool call, but it is not an auto-push, auto-merge, or hosted review service.
   Block rules are checked first, then the built-in safety floor, then allow
   rules. In Ask and Auto-Review, a safety hold opens approval; in Full Access
@@ -1639,7 +1639,7 @@ tools loaded on every request, add them to `[tools].always_load`:
 
 ```toml
 [tools]
-always_load = ["git_show", "notify"]
+always_load = ["Git", "notify"]
 ```
 
 ## Feature Flags
@@ -1652,7 +1652,7 @@ want to force on or off.
 [features]
 shell_tool = true
 subagents = true
-web_search = true # enables canonical web.run plus the compatibility web_search alias
+web_search = true # enables deferred Web; the flag name is retained for config compatibility
 apply_patch = true
 mcp = true
 exec_policy = true

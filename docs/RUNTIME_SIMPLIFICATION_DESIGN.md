@@ -1,4 +1,4 @@
-# CodeWhale Runtime Simplification Design
+# Codewhale Runtime Simplification Design
 
 ## Goal
 
@@ -63,8 +63,8 @@ Default eager count target: **~10** (vs. ~18 today), with the durable families a
 
 - Replace the tool-calling recipe sections in `AGENT_MODE` and
   `SUBAGENT_OUTPUT_FORMAT` with short references to the canonical tools.
-- Reduce mode deltas to permission statements (Agent = write requires approval,
-  Plan = no writes or shell, YOLO = auto-approved, Operate = coordinate from
+- Reduce mode deltas to permission statements (Act = write requires approval,
+  Plan = no writes or shell, Full Access = auto-approved, Operate = coordinate from
   ordinary messages).
 - Keep the `BASE_PROMPT` behavioral invariants, `LANGUAGE_PROMPT`, and
   `OUTPUT_PROMPT` intact.

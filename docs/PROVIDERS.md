@@ -361,7 +361,8 @@ upload to Hugging Face and does not perform direct Hugging Face Hub HTTP search.
 work. The chat picker also exposes `mimo-v2.5-pro-ultraspeed` and the latest
 Omni model `mimo-v2.5`. Xiaomi MiMo TTS is available through
 `codewhale --provider xiaomi-mimo speech "text" --model tts` (or the `tts`
-alias) plus model-visible `speech` / `tts` tools in Agent/YOLO mode.
+alias). In Act and Operate, the provider-specific `speech` / `tts` tools are
+available through deferred discovery when the Xiaomi MiMo route is configured.
 
 `/provider xiaomi-mimo ultraspeed` and `/provider xiaomi-mimo pro-ultraspeed`
 both select `mimo-v2.5-pro-ultraspeed`. Speech aliases such as `tts`,
@@ -570,8 +571,9 @@ provider auth and artifact movement stay separate.
 
 Codewhale only executes tools when the provider returns Chat Completions
 `tool_calls` or streamed `delta.tool_calls`. If a local model prints text such
-as `{"name":"grep_files","arguments":{...}}` in the assistant message, that is
-ordinary model output, not an executable tool request.
+as `{"name":"File","arguments":{"action":"search_content",...}}` in the
+assistant message, that is ordinary model output, not an executable tool
+request.
 
 For OpenAI-compatible or local runtimes, check:
 
@@ -579,8 +581,8 @@ For OpenAI-compatible or local runtimes, check:
 - The selected model or chat template is configured for function/tool calls.
 - The server returns `tool_calls` in the response rather than plain JSON text.
 - The compatibility layer does not strip tools before forwarding the request.
-- If in doubt, test a small `read_file` or `grep_files` request against a known
-  tool-calling model before debugging Codewhale's tool registry.
+- If in doubt, test a small `File` `read` or `search_content` action against a
+  known tool-calling model before debugging Codewhale's tool registry.
 
 Changing `provider`, `base_url`, or `model` can select a route that supports the
 OpenAI-compatible payload shape, but Codewhale cannot convert arbitrary JSON
