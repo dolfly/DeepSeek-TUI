@@ -381,6 +381,9 @@ fn coordination_row(app: &App) -> Option<RankedWorkRow> {
     } else {
         WorkBucket::Recent
     };
+    let title = app
+        .tr(crate::localization::MessageId::CoordinationWorkTitle)
+        .into_owned();
     Some(RankedWorkRow {
         bucket,
         // Coordination is a session-wide receipt, before individual workers
@@ -393,13 +396,13 @@ fn coordination_row(app: &App) -> Option<RankedWorkRow> {
             } else {
                 crate::tui::glyphs::DONE
             },
-            label: "Coordination Work".to_string(),
-            detail: crate::tui::coordination_detail::summary(projection),
+            label: title.clone(),
+            detail: crate::tui::coordination_detail::summary(app.ui_locale, projection),
             tone: bucket_tone(bucket),
             selectable: true,
             primary_action: Some(SidebarRowAction::InspectWork {
-                title: "Coordination Work".to_string(),
-                body: crate::tui::coordination_detail::format(projection),
+                title,
+                body: crate::tui::coordination_detail::format(app.ui_locale, projection),
                 stop_action: None,
             }),
         },

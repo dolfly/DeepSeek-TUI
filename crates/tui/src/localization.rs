@@ -1140,6 +1140,45 @@ pub enum MessageId {
     SidebarDestructiveArmed,
     WorkSurfaceTodoProgress,
     WorkSurfaceStopConfirmHint,
+    CoordinationWorkTitle,
+    CoordinationSummaryDecisions,
+    CoordinationSummaryContentions,
+    CoordinationSummaryReconciled,
+    CoordinationSchema,
+    CoordinationSequence,
+    CoordinationBoundedRecords,
+    CoordinationDecisionsHeading,
+    CoordinationNone,
+    CoordinationNoneValue,
+    CoordinationStatus,
+    CoordinationOwner,
+    CoordinationVersion,
+    CoordinationWriteClaimsHeading,
+    CoordinationIsolated,
+    CoordinationSharedWorkspace,
+    CoordinationPaths,
+    CoordinationContracts,
+    CoordinationContentionsHeading,
+    CoordinationClaimant,
+    CoordinationDisposition,
+    CoordinationNeutralReconciliationHeading,
+    CoordinationCandidates,
+    CoordinationRetry,
+    CoordinationReviewer,
+    CoordinationVerifier,
+    CoordinationVerification,
+    CoordinationContextProjectionsHeading,
+    CoordinationContextDecisions,
+    CoordinationBytes,
+    CoordinationDeduplicated,
+    CoordinationOmitted,
+    CoordinationActiveHotPathsHeading,
+    CoordinationActiveClaims,
+    CoordinationMetricsNoteHeading,
+    CoordinationMetricsNoAuthoritativeSource,
+    CoordinationStatusProposed,
+    CoordinationStatusAccepted,
+    CoordinationStatusSuperseded,
     // Composer slash menu.
     ComposerSlashMenuHint,
     // Approval modal — repository law band.
@@ -2165,6 +2204,45 @@ pub const ALL_MESSAGE_IDS: &[MessageId] = &[
     MessageId::SidebarDestructiveArmed,
     MessageId::WorkSurfaceTodoProgress,
     MessageId::WorkSurfaceStopConfirmHint,
+    MessageId::CoordinationWorkTitle,
+    MessageId::CoordinationSummaryDecisions,
+    MessageId::CoordinationSummaryContentions,
+    MessageId::CoordinationSummaryReconciled,
+    MessageId::CoordinationSchema,
+    MessageId::CoordinationSequence,
+    MessageId::CoordinationBoundedRecords,
+    MessageId::CoordinationDecisionsHeading,
+    MessageId::CoordinationNone,
+    MessageId::CoordinationNoneValue,
+    MessageId::CoordinationStatus,
+    MessageId::CoordinationOwner,
+    MessageId::CoordinationVersion,
+    MessageId::CoordinationWriteClaimsHeading,
+    MessageId::CoordinationIsolated,
+    MessageId::CoordinationSharedWorkspace,
+    MessageId::CoordinationPaths,
+    MessageId::CoordinationContracts,
+    MessageId::CoordinationContentionsHeading,
+    MessageId::CoordinationClaimant,
+    MessageId::CoordinationDisposition,
+    MessageId::CoordinationNeutralReconciliationHeading,
+    MessageId::CoordinationCandidates,
+    MessageId::CoordinationRetry,
+    MessageId::CoordinationReviewer,
+    MessageId::CoordinationVerifier,
+    MessageId::CoordinationVerification,
+    MessageId::CoordinationContextProjectionsHeading,
+    MessageId::CoordinationContextDecisions,
+    MessageId::CoordinationBytes,
+    MessageId::CoordinationDeduplicated,
+    MessageId::CoordinationOmitted,
+    MessageId::CoordinationActiveHotPathsHeading,
+    MessageId::CoordinationActiveClaims,
+    MessageId::CoordinationMetricsNoteHeading,
+    MessageId::CoordinationMetricsNoAuthoritativeSource,
+    MessageId::CoordinationStatusProposed,
+    MessageId::CoordinationStatusAccepted,
+    MessageId::CoordinationStatusSuperseded,
     MessageId::ComposerSlashMenuHint,
     MessageId::ApprovalRepoLawBadge,
     MessageId::ApprovalRepoLawTitle,
@@ -2452,6 +2530,30 @@ mod tests {
             assert_ne!(
                 tr(*locale, MessageId::WorkSurfaceStopConfirmHint),
                 "confirm stop · Esc cancels"
+            );
+        }
+    }
+
+    #[test]
+    fn coordination_work_chrome_is_explicitly_localized() {
+        for locale in Locale::shipped_complete() {
+            if *locale == Locale::En {
+                continue;
+            }
+            assert_ne!(
+                tr(*locale, MessageId::CoordinationWorkTitle),
+                tr(Locale::En, MessageId::CoordinationWorkTitle),
+                "{} fell back to the English Coordination Work title",
+                locale.tag()
+            );
+            assert_ne!(
+                tr(*locale, MessageId::CoordinationMetricsNoAuthoritativeSource),
+                tr(
+                    Locale::En,
+                    MessageId::CoordinationMetricsNoAuthoritativeSource
+                ),
+                "{} fell back to the English coordination metrics note",
+                locale.tag()
             );
         }
     }

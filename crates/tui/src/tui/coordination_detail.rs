@@ -6,17 +6,21 @@
 
 use std::fmt::Write as _;
 
+use crate::localization::{Locale, MessageId, tr};
 use crate::tools::subagent::CoordinationDetailProjection;
 use crate::tools::subagent::coord::{DecisionStatus, ReconciliationReceipt};
 
 #[must_use]
-pub(crate) fn summary(projection: &CoordinationDetailProjection) -> String {
-    format!(
-        "{} decisions · {} contentions · {} reconciled",
-        projection.decisions.len(),
-        projection.contentions.len(),
-        projection.reconciliations.len()
-    )
+pub(crate) fn summary(locale: Locale, projection: &CoordinationDetailProjection) -> String {
+    [
+        tr(locale, MessageId::CoordinationSummaryDecisions)
+            .replace("{count}", &projection.decisions.len().to_string()),
+        tr(locale, MessageId::CoordinationSummaryContentions)
+            .replace("{count}", &projection.contentions.len().to_string()),
+        tr(locale, MessageId::CoordinationSummaryReconciled)
+            .replace("{count}", &projection.reconciliations.len().to_string()),
+    ]
+    .join(" · ")
 }
 
 #[must_use]
@@ -37,104 +41,163 @@ pub(crate) fn needs_attention(projection: &CoordinationDetailProjection) -> bool
 /// Those fields inform delegated prompts and headless inspection, but they can
 /// contain operator-authored detail that does not belong in ambient TUI chrome.
 #[must_use]
-pub(crate) fn format(projection: &CoordinationDetailProjection) -> String {
+pub(crate) fn format(locale: Locale, projection: &CoordinationDetailProjection) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "Schema {} · sequence {} · bounded to {} records",
-        projection.schema_version, projection.sequence, projection.limit
+        "{} · {} · {}",
+        tr(locale, MessageId::CoordinationSchema)
+            .replace("{value}", &projection.schema_version.to_string()),
+        tr(locale, MessageId::CoordinationSequence)
+            .replace("{value}", &projection.sequence.to_string()),
+        tr(locale, MessageId::CoordinationBoundedRecords)
+            .replace("{count}", &projection.limit.to_string())
     );
 
-    section(&mut out, "Decisions");
+    section(
+        &mut out,
+        tr(locale, MessageId::CoordinationDecisionsHeading).as_ref(),
+    );
     if projection.decisions.is_empty() {
-        let _ = writeln!(out, "None");
+        let _ = writeln!(out, "{}", tr(locale, MessageId::CoordinationNone));
     } else {
         for decision in &projection.decisions {
+            let status = tr(locale, MessageId::CoordinationStatus).replace(
+                "{status}",
+                decision_status(locale, decision.status).as_ref(),
+            );
+            let owner =
+                tr(locale, MessageId::CoordinationOwner).replace("{owner}", &decision.owner);
+            let version = tr(locale, MessageId::CoordinationVersion)
+                .replace("{version}", &decision.version.to_string());
             let _ = writeln!(
                 out,
-                "{} · {}\n  status {} · owner {} · version {}",
-                decision.decision_id,
-                decision.subject,
-                decision_status(decision.status),
-                decision.owner,
-                decision.version
+                "{} · {}\n  {} · {} · {}",
+                decision.decision_id, decision.subject, status, owner, version
             );
         }
     }
 
-    section(&mut out, "Write claims");
+    section(
+        &mut out,
+        tr(locale, MessageId::CoordinationWriteClaimsHeading).as_ref(),
+    );
     if projection.write_claims.is_empty() {
-        let _ = writeln!(out, "None");
+        let _ = writeln!(out, "{}", tr(locale, MessageId::CoordinationNone));
     } else {
         for receipt in &projection.write_claims {
             let claim = &receipt.claim;
+            let workspace = if receipt.isolated_worktree {
+                tr(locale, MessageId::CoordinationIsolated)
+            } else {
+                tr(locale, MessageId::CoordinationSharedWorkspace)
+            };
             let _ = writeln!(
                 out,
-                "{} · {}\n  paths {}\n  contracts {}",
+                "{} · {}\n  {}\n  {}",
                 claim.owner,
-                if receipt.isolated_worktree {
-                    "isolated"
-                } else {
-                    "shared workspace"
-                },
-                joined_paths(&claim.roots, &claim.exact_files),
-                joined_or_none(&claim.contracts)
+                workspace,
+                tr(locale, MessageId::CoordinationPaths).replace(
+                    "{paths}",
+                    &joined_paths(locale, &claim.roots, &claim.exact_files)
+                ),
+                tr(locale, MessageId::CoordinationContracts)
+                    .replace("{contracts}", &joined_or_none(locale, &claim.contracts))
             );
         }
     }
 
-    section(&mut out, "Contentions");
+    section(
+        &mut out,
+        tr(locale, MessageId::CoordinationContentionsHeading).as_ref(),
+    );
     if projection.contentions.is_empty() {
-        let _ = writeln!(out, "None");
+        let _ = writeln!(out, "{}", tr(locale, MessageId::CoordinationNone));
     } else {
         for receipt in &projection.contentions {
+            let claimant = tr(locale, MessageId::CoordinationClaimant)
+                .replace("{claimant}", &receipt.claimant);
+            let owner = tr(locale, MessageId::CoordinationOwner)
+                .replace("{owner}", &receipt.conflicting_owner);
             let _ = writeln!(
                 out,
-                "claimant {} · owner {}\n  paths {}\n  contracts {}\n  disposition {}",
-                receipt.claimant,
-                receipt.conflicting_owner,
-                joined_paths(&receipt.roots, &receipt.exact_files),
-                joined_or_none(&receipt.contracts),
-                receipt.disposition
+                "{} · {}\n  {}\n  {}\n  {}",
+                claimant,
+                owner,
+                tr(locale, MessageId::CoordinationPaths).replace(
+                    "{paths}",
+                    &joined_paths(locale, &receipt.roots, &receipt.exact_files)
+                ),
+                tr(locale, MessageId::CoordinationContracts)
+                    .replace("{contracts}", &joined_or_none(locale, &receipt.contracts)),
+                tr(locale, MessageId::CoordinationDisposition)
+                    .replace("{disposition}", &receipt.disposition)
             );
         }
     }
 
-    section(&mut out, "Neutral reconciliation");
+    section(
+        &mut out,
+        tr(locale, MessageId::CoordinationNeutralReconciliationHeading).as_ref(),
+    );
     if projection.reconciliations.is_empty() {
-        let _ = writeln!(out, "None");
+        let _ = writeln!(out, "{}", tr(locale, MessageId::CoordinationNone));
     } else {
         for receipt in &projection.reconciliations {
-            format_reconciliation(&mut out, receipt);
+            format_reconciliation(&mut out, locale, receipt);
         }
     }
 
-    section(&mut out, "Context projections");
+    section(
+        &mut out,
+        tr(locale, MessageId::CoordinationContextProjectionsHeading).as_ref(),
+    );
     if projection.context_projections.is_empty() {
-        let _ = writeln!(out, "None");
+        let _ = writeln!(out, "{}", tr(locale, MessageId::CoordinationNone));
     } else {
         for receipt in &projection.context_projections {
+            let decisions = tr(locale, MessageId::CoordinationContextDecisions).replace(
+                "{decisions}",
+                &joined_or_none(locale, &receipt.decision_ids),
+            );
+            let bytes = tr(locale, MessageId::CoordinationBytes)
+                .replace("{count}", &receipt.projected_bytes.to_string());
+            let deduplicated = tr(locale, MessageId::CoordinationDeduplicated)
+                .replace("{count}", &receipt.deduplicated.to_string());
+            let omitted = tr(locale, MessageId::CoordinationOmitted)
+                .replace("{count}", &receipt.omitted.to_string());
             let _ = writeln!(
                 out,
-                "{} · decisions {} · {} bytes · {} deduplicated · {} omitted",
-                receipt.child_id,
-                joined_or_none(&receipt.decision_ids),
-                receipt.projected_bytes,
-                receipt.deduplicated,
-                receipt.omitted
+                "{} · {} · {} · {} · {}",
+                receipt.child_id, decisions, bytes, deduplicated, omitted
             );
         }
     }
 
-    section(&mut out, "Active hot paths");
+    section(
+        &mut out,
+        tr(locale, MessageId::CoordinationActiveHotPathsHeading).as_ref(),
+    );
     if projection.metrics.hottest_paths.is_empty() {
-        let _ = writeln!(out, "None");
+        let _ = writeln!(out, "{}", tr(locale, MessageId::CoordinationNone));
     } else {
         for path in &projection.metrics.hottest_paths {
-            let _ = writeln!(out, "{} · {} active claims", path.path, path.active_claims);
+            let active_claims = tr(locale, MessageId::CoordinationActiveClaims)
+                .replace("{count}", &path.active_claims.to_string());
+            let _ = writeln!(out, "{} · {}", path.path, active_claims);
         }
     }
-    let _ = writeln!(out, "Metrics note\n{}", projection.metrics.note);
+    section(
+        &mut out,
+        tr(locale, MessageId::CoordinationMetricsNoteHeading).as_ref(),
+    );
+    // The headless projection retains the exact typed metrics note. Ambient
+    // TUI chrome owns a localized explanation of the same current invariant.
+    let _ = writeln!(
+        out,
+        "{}",
+        tr(locale, MessageId::CoordinationMetricsNoAuthoritativeSource)
+    );
 
     out.trim_end().to_string()
 }
@@ -143,45 +206,56 @@ fn section(out: &mut String, label: &str) {
     let _ = write!(out, "\n{label}\n");
 }
 
-fn format_reconciliation(out: &mut String, receipt: &ReconciliationReceipt) {
+fn format_reconciliation(out: &mut String, locale: Locale, receipt: &ReconciliationReceipt) {
+    let candidates = tr(locale, MessageId::CoordinationCandidates)
+        .replace("{count}", &receipt.candidate_handles.len().to_string());
+    let retry = tr(locale, MessageId::CoordinationRetry)
+        .replace("{count}", &receipt.retry_count.to_string())
+        .replace("{limit}", &receipt.retry_limit.to_string());
     let _ = writeln!(
         out,
-        "{} · {} candidates · retry {}/{}\n  owner {}\n  reviewer {}\n  verifier {}\n  verification {}",
+        "{} · {} · {}\n  {}\n  {}\n  {}\n  {}",
         receipt.subject,
-        receipt.candidate_handles.len(),
-        receipt.retry_count,
-        receipt.retry_limit,
-        receipt.owner,
-        joined_or_none(&receipt.reviewer_evidence_handles),
-        joined_or_none(&receipt.verifier_evidence_handles),
-        receipt.verification_outcome
+        candidates,
+        retry,
+        tr(locale, MessageId::CoordinationOwner).replace("{owner}", &receipt.owner),
+        tr(locale, MessageId::CoordinationReviewer).replace(
+            "{reviewer}",
+            &joined_or_none(locale, &receipt.reviewer_evidence_handles)
+        ),
+        tr(locale, MessageId::CoordinationVerifier).replace(
+            "{verifier}",
+            &joined_or_none(locale, &receipt.verifier_evidence_handles)
+        ),
+        tr(locale, MessageId::CoordinationVerification)
+            .replace("{verification}", &receipt.verification_outcome)
     );
 }
 
-const fn decision_status(status: DecisionStatus) -> &'static str {
+fn decision_status(locale: Locale, status: DecisionStatus) -> std::borrow::Cow<'static, str> {
     match status {
-        DecisionStatus::Proposed => "proposed",
-        DecisionStatus::Accepted => "accepted",
-        DecisionStatus::Superseded => "superseded",
+        DecisionStatus::Proposed => tr(locale, MessageId::CoordinationStatusProposed),
+        DecisionStatus::Accepted => tr(locale, MessageId::CoordinationStatusAccepted),
+        DecisionStatus::Superseded => tr(locale, MessageId::CoordinationStatusSuperseded),
     }
 }
 
-fn joined_paths(roots: &[String], exact_files: &[String]) -> String {
+fn joined_paths(locale: Locale, roots: &[String], exact_files: &[String]) -> String {
     let values = roots
         .iter()
         .chain(exact_files)
         .map(String::as_str)
         .collect::<Vec<_>>();
     if values.is_empty() {
-        "none".to_string()
+        tr(locale, MessageId::CoordinationNoneValue).into_owned()
     } else {
         values.join(", ")
     }
 }
 
-fn joined_or_none(values: &[String]) -> String {
+fn joined_or_none(locale: Locale, values: &[String]) -> String {
     if values.is_empty() {
-        "none".to_string()
+        tr(locale, MessageId::CoordinationNoneValue).into_owned()
     } else {
         values.join(", ")
     }
@@ -270,7 +344,7 @@ mod tests {
 
     #[test]
     fn formatter_uses_typed_receipts_without_transcript_shaped_fields() {
-        let text = format(&projection());
+        let text = format(Locale::En, &projection());
         for required in [
             "decision-ui · composer edges",
             "status accepted · owner planner · version 3",
@@ -290,6 +364,38 @@ mod tests {
         assert!(!text.contains("PRIVATE-TRANSCRIPT-MARKER"), "{text}");
         assert!(!text.contains("hidden-evidence"), "{text}");
         assert!(!text.contains("ignored"), "{text}");
+    }
+
+    #[test]
+    fn complete_locale_packs_translate_chrome_and_preserve_receipt_values() {
+        let value = projection();
+        let english = format(Locale::En, &value);
+        for locale in Locale::shipped_complete() {
+            let text = format(*locale, &value);
+            let summary = summary(*locale, &value);
+            for literal in [
+                "decision-ui",
+                "composer edges",
+                "worker-a",
+                "blocked_pending_isolation_or_serialization",
+                "agent:reviewer",
+                "agent:verifier",
+                "crates/tui",
+            ] {
+                assert!(text.contains(literal), "{locale:?} lost {literal}:\n{text}");
+            }
+            assert!(
+                !text.contains('{'),
+                "{locale:?} has a raw placeholder:\n{text}"
+            );
+            assert!(
+                !summary.contains('{'),
+                "{locale:?} summary has a raw placeholder: {summary}"
+            );
+            if *locale != Locale::En {
+                assert_ne!(text, english, "{locale:?} fell back to English");
+            }
+        }
     }
 
     #[test]
