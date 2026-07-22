@@ -10305,7 +10305,7 @@ impl SubAgentToolRegistry {
                 .validate_write_scope(&self.owner_agent_id, &paths)
                 .map_err(anyhow::Error::msg)?;
         } else if self.enforce_write_claim
-            && (name == "exec_shell"
+            && (is_unbounded_shell_run(name, &input)
                 || self.registry.get(name).is_some_and(|spec| {
                     spec.approval_requirement_for(&input) == ApprovalRequirement::Suggest
                 }))
@@ -10328,6 +10328,10 @@ impl SubAgentToolRegistry {
             .map(|result| result.content)
             .map_err(|e| anyhow!(e))
     }
+}
+
+fn is_unbounded_shell_run(name: &str, input: &Value) -> bool {
+    canonical_action_alias(name, input) == "exec_shell"
 }
 
 fn mutation_paths(name: &str, input: &Value) -> Result<Vec<String>> {

@@ -63,11 +63,6 @@ const CORE_ACTION_TOOL_FALLBACKS: &[CoreActionToolFallback] = &[
         unavailable_reason: "Not present in the current model-visible catalog. Interactive Agent sessions expose shell by default unless allow_shell = false; noninteractive and durable profiles require allow_shell = true. Plan mode hides shell, and command tool allow/deny gates can also block it.",
     },
     CoreActionToolFallback {
-        name: "exec_shell",
-        description: "Run shell commands in the workspace.",
-        unavailable_reason: "Not present in the current model-visible catalog. Interactive Agent sessions expose shell by default unless allow_shell = false; noninteractive and durable profiles require allow_shell = true. Plan mode hides shell, and command tool allow/deny gates can also block it.",
-    },
-    CoreActionToolFallback {
         name: "File",
         description: "Read, search, and modify workspace files.",
         unavailable_reason: "Not present in the current model-visible catalog. File reads are available in Plan and Agent modes; write and edit actions require an executable mode, while patch also requires the apply_patch feature.",

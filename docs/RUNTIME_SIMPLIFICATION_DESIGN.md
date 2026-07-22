@@ -25,12 +25,15 @@ Make the model-facing runtime smaller, calmer, and easier for models to use by:
 | `automation` | durable automation family (existing; deferred by default) |
 | `rlm` | durable RLM family (existing; deferred by default) |
 | `agent` | sub-agent dispatch |
+| `remember` | opt-in durable user-memory capture; eager whenever registered |
 | `work_update` | progress / plan-of-work updates |
 | `update_plan` | plan artifact updates |
 | `tool_search` | on-demand discovery of deferred tools |
 
-Default eager count target: **~10** (vs. ~18 today), with the durable families and
-`Web` discoverable via `tool_search` when needed.
+Default-active policy: **10 names** (vs. ~18 before the simplification), with
+`remember` registered only for built-in-memory users and the durable families
+and `Web` discoverable via `tool_search` when needed. `tool_search` itself is a
+synthetic always-active catalog entry.
 
 ## Rejected alternatives
 
@@ -84,17 +87,18 @@ Default eager count target: **~10** (vs. ~18 today), with the durable families a
 
 ### v0.9.1 receipt
 
-Measured with `python3 scripts/measure-runtime-contract.py` on 2026-07-21:
+The source contract and provider-free metric now exercise the complete policy,
+including opt-in `remember`:
 
 | Contract | Before | After |
 |---|---:|---:|
-| Default active tools | 18 | 9 |
-| Active tool bytes | ~25,650 | 20,772 |
+| Default active tools | 18 | 10 |
 | Agent-mode instruction bytes | 4,064 | 663 |
 | Full system-prompt bytes | 15,842 | 15,368 |
 
-The final active names are `Bash`, `File`, `Git`, `Run`, `agent`, `tasks`,
-`update_plan`, `work_update`, and `tool_search`. `File` advertises only read
-actions in Plan mode, and its `patch` action appears only when the existing
-apply-patch feature is enabled. Hidden aliases remain executable for transcript
-replay but are absent from the model catalog.
+The final active names are `Bash`, `File`, `Git`, `Run`, `agent`, `remember`,
+`tasks`, `update_plan`, `work_update`, and `tool_search`. `remember` is present
+only when built-in memory is enabled; it is eager whenever registered. `File`
+advertises only read actions in Plan mode, and its `patch` action appears only
+when the existing apply-patch feature is enabled. Hidden aliases remain
+executable for transcript replay but are absent from the model catalog.

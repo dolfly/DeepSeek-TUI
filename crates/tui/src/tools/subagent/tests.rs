@@ -5815,6 +5815,7 @@ fn subagent_registry_with_mcp_action(auto_approve: bool) -> SubAgentToolRegistry
 async fn child_write_tool_fails_closed_outside_registered_scope() {
     let tmp = tempdir().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::create_dir_all(tmp.path().join("outside")).unwrap();
     let manager = new_shared_subagent_manager(tmp.path().to_path_buf(), 2);
     {
         let mut guard = manager.write().await;
@@ -5868,20 +5869,51 @@ async fn child_write_tool_fails_closed_outside_registered_scope() {
         "{err}"
     );
     assert!(!tmp.path().join("docs/no.txt").exists());
-    let shell_err = registry
-        .execute(
-            "agent_scoped",
+    for (tool_name, input, target) in [
+        (
             "exec_shell",
-            json!({"command": "touch docs/shell.txt"}),
-        )
-        .await
-        .expect_err("unbounded shared-workspace shell must fail")
-        .to_string();
-    assert!(
-        shell_err.contains("cannot prove a bounded file target"),
-        "{shell_err}"
-    );
-    assert!(!tmp.path().join("docs/shell.txt").exists());
+            json!({"command": "touch outside/compat.txt"}),
+            "outside/compat.txt",
+        ),
+        (
+            "Bash",
+            json!({"action": "run", "command": "touch outside/canonical.txt"}),
+            "outside/canonical.txt",
+        ),
+    ] {
+        let shell_err = registry
+            .execute("agent_scoped", tool_name, input)
+            .await
+            .expect_err("unbounded shared-workspace shell must fail")
+            .to_string();
+        assert!(
+            shell_err.contains("cannot prove a bounded file target"),
+            "{tool_name}: {shell_err}"
+        );
+        assert!(
+            !tmp.path().join(target).exists(),
+            "{tool_name} created {target} outside its registered claim"
+        );
+    }
+}
+
+#[test]
+fn shared_claim_shell_gate_normalizes_only_the_run_action() {
+    assert!(is_unbounded_shell_run(
+        "exec_shell",
+        &json!({"command": "true"})
+    ));
+    assert!(is_unbounded_shell_run(
+        "Bash",
+        &json!({"action": "run", "command": "true"})
+    ));
+    assert!(is_unbounded_shell_run("Bash", &json!({"command": "true"})));
+    for action in ["wait", "interact", "cancel"] {
+        assert!(
+            !is_unbounded_shell_run("Bash", &json!({"action": action})),
+            "Bash.{action} must retain its existing non-run claim behavior"
+        );
+    }
 }
 
 #[tokio::test]
