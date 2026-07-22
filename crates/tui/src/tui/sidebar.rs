@@ -7368,8 +7368,8 @@ mod tests {
             "label hover should carry the branch: {label:?}"
         );
         assert!(
-            label.contains("progress: step 2/3: running tool 'read_file'"),
-            "label hover should carry untruncated progress: {label:?}"
+            label.contains("current activity: step 2/3: running tool 'read_file'"),
+            "label hover should carry untruncated current activity: {label:?}"
         );
     }
 

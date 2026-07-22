@@ -1434,10 +1434,8 @@ mod tests {
         assert_eq!(app.hunt.token_budget, Some(100));
 
         let (mut app, _tmpdir, _guard) = create_isolated_test_app();
-        let skills = execute("/skills", &mut app)
-            .message
-            .expect("/skills should return text");
-        assert!(skills.contains("Skills location:"));
+        let result = execute("/skills", &mut app);
+        assert!(matches!(result.action, Some(AppAction::OpenSkillsManager)));
 
         let mut app = create_test_app();
         let result = execute("/task list", &mut app);

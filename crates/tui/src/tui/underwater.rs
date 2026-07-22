@@ -1819,14 +1819,15 @@ mod tests {
         app.runtime_turn_status = Some("in_progress".to_string());
         app.turn_started_at = Some(Instant::now() - Duration::from_secs(3));
 
-        // A live test run reads as `verifying` with the metered tick.
+        // A live test run reads as `verifying`. Reduced motion keeps the
+        // semantic label while sharing the calm, static live-work marker.
         let mut active = ActiveCell::new();
         active.push_tool("exec-1", running_exec("cargo test -p codewhale-tui"));
         app.active_cell = Some(active);
         assert_eq!(ShellPhase::from_app(&app), ShellPhase::Verifying);
         app.low_motion = true;
         let (marker, label) = phase_marker(&app, ShellPhase::Verifying);
-        assert_eq!(marker, crate::tui::spinner::VERIFY_TICK_FRAMES[4]);
+        assert_eq!(marker, crate::tui::spinner::BRAILLE_SPINNER_STILL_FRAME);
         assert_eq!(label, "verifying");
         app.low_motion = false;
 
