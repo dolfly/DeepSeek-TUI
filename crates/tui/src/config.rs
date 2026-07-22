@@ -7345,25 +7345,64 @@ pub(crate) fn is_exact_kimi_code_k3_route(
         && model.trim().eq_ignore_ascii_case(KIMI_CODE_K3_MODEL)
 }
 
-/// Reject the Claude Code-only `k3[1m]` context hint when it is supplied as a
-/// Kimi Code API model id. Codewhale has a first-class context-window field,
-/// so silently rewriting this value would both send the wrong wire id and
-/// claim a plan entitlement the user may not have.
+/// Fail closed on known-bad K3 model/endpoint pairings (#4687).
+///
+/// - Reject Claude Code's `k3[1m]` context hint as a Kimi Code API model id.
+/// - Reject `kimi-k3` on the exact Kimi Code membership endpoint (use `k3`).
+/// - Reject bare `k3` on the exact Moonshot direct platform endpoint (use `kimi-k3`).
+///
+/// Custom Moonshot-compatible gateways are left alone: only the two canonical
+/// endpoints enforce the documented model IDs.
 pub(crate) fn validate_kimi_code_api_model_id(
     provider: ApiProvider,
     base_url: &str,
     model: &str,
 ) -> std::result::Result<(), String> {
-    if provider == ApiProvider::Moonshot
-        && moonshot_base_url_is_exact_kimi_code(base_url)
-        && model.trim().eq_ignore_ascii_case("k3[1m]")
+    if provider != ApiProvider::Moonshot {
+        return Ok(());
+    }
+    let model = model.trim();
+    if model.is_empty() {
+        return Ok(());
+    }
+
+    if moonshot_base_url_is_exact_kimi_code(base_url) {
+        if model.eq_ignore_ascii_case("k3[1m]") {
+            return Err(
+                "Kimi Code model `k3[1m]` is a Claude Code environment convention, not an API model id. Use model = \"k3\". If your Kimi Code plan includes 1M context, also set context_window = 1048576; otherwise keep the 262144 safe default."
+                    .to_string(),
+            );
+        }
+        if model.eq_ignore_ascii_case(MOONSHOT_KIMI_K3_MODEL) {
+            return Err(
+                "Kimi Code membership route (api.kimi.com/coding/v1) does not accept model = \"kimi-k3\". Use model = \"k3\" for this base_url. Direct Moonshot pay-as-you-go uses base_url = \"https://api.moonshot.ai/v1\" with model = \"kimi-k3\"."
+                    .to_string(),
+            );
+        }
+        return Ok(());
+    }
+
+    if moonshot_base_url_is_exact_direct_platform(base_url)
+        && model.eq_ignore_ascii_case(KIMI_CODE_K3_MODEL)
     {
         return Err(
-            "Kimi Code model `k3[1m]` is a Claude Code environment convention, not an API model id. Use model = \"k3\". If your Kimi Code plan includes 1M context, also set context_window = 1048576; otherwise keep the 262144 safe default."
+            "Moonshot direct route (api.moonshot.ai/v1) does not accept bare model = \"k3\". Use model = \"kimi-k3\" for this base_url. Kimi Code membership uses base_url = \"https://api.kimi.com/coding/v1\" with model = \"k3\"."
                 .to_string(),
         );
     }
+
     Ok(())
+}
+
+/// Short route label for header/diagnostics without credentials (#4687).
+pub(crate) fn moonshot_k3_route_display_name(base_url: &str, model: &str) -> Option<&'static str> {
+    if is_exact_kimi_code_k3_route(ApiProvider::Moonshot, base_url, model) {
+        return Some("Kimi Code membership / k3");
+    }
+    if is_exact_direct_moonshot_k3_route(ApiProvider::Moonshot, base_url, model) {
+        return Some("Moonshot direct / kimi-k3");
+    }
+    None
 }
 
 /// Credential help for a concrete provider route.

@@ -6209,11 +6209,15 @@ fn doctor_route_report(config: &Config) -> serde_json::Value {
         })
     });
 
+    let route_identity =
+        crate::config::moonshot_k3_route_display_name(&target.base_url, &target.model);
+
     json!({
         "provider": target.provider,
         "provider_source": doctor_provider_source(config),
         "provider_config_table": doctor_provider_config_table(config, provider),
         "model": target.model,
+        "route_identity": route_identity,
         "wire_protocol": doctor_wire_protocol(provider),
         "base_url": {
             "redacted": redacted_base_url,

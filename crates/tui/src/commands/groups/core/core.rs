@@ -1042,13 +1042,19 @@ mod tests {
             Some(u64::from(crate::config::KIMI_CODE_K3_CONTEXT_WINDOW_TOKENS))
         );
 
-        // The same bare model ID on Moonshot's direct API must retain the
-        // generic route limits rather than inheriting Kimi Code entitlement.
+        // Switching to the direct platform endpoint requires the direct model
+        // id (`kimi-k3`); bare `k3` is fail-closed (#4687).
         app.active_route_base_url = crate::config::DEFAULT_MOONSHOT_BASE_URL.to_string();
-        let direct = model(&mut app, Some(crate::config::KIMI_CODE_K3_MODEL));
+        let rejected = model(&mut app, Some(crate::config::KIMI_CODE_K3_MODEL));
+        assert!(
+            rejected.is_error,
+            "bare k3 on direct Moonshot must fail closed: {rejected:?}"
+        );
+
+        let direct = model(&mut app, Some(crate::config::MOONSHOT_KIMI_K3_MODEL));
         assert!(
             !direct.is_error,
-            "direct Moonshot route remains valid: {direct:?}"
+            "direct Moonshot kimi-k3 remains valid: {direct:?}"
         );
         assert_ne!(
             app.active_route_limits
