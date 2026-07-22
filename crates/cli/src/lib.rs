@@ -5284,7 +5284,9 @@ mod tests {
     }
 
     #[test]
-    fn raw_provider_dispatch_defers_dynamic_config_to_the_tui() {
+    fn persisted_custom_provider_crosses_config_and_root_tui_launch_boundary() {
+        let _lock = env_lock();
+        let (_tui_dir, _tui_bin) = install_fake_tui_binary();
         let dir = tempfile::TempDir::new().expect("tempdir");
         let config_path = dir.path().join("config.toml");
         std::fs::write(
@@ -5298,12 +5300,34 @@ model = "qwen-2.5-7b"
 "#,
         )
         .expect("custom provider config fixture");
-        assert!(
-            ConfigStore::load(Some(config_path.clone())).is_err(),
-            "the enum-backed dispatcher store must not be the owner of dynamic provider config"
-        );
+        let store = ConfigStore::load(Some(config_path.clone()))
+            .expect("a TUI-persisted custom provider must cross the dispatcher parser");
+        assert_eq!(store.config.provider, ProviderKind::Custom);
+        assert_eq!(store.config.provider_id(), "lm-studio");
+
+        let resolved = store
+            .config
+            .resolve_runtime_options(&CliRuntimeOverrides::default());
+        assert_eq!(resolved.provider, ProviderKind::Custom);
+        assert_eq!(resolved.base_url, "http://127.0.0.1:1234/v1");
+        assert_eq!(resolved.model, "qwen-2.5-7b");
 
         let config = config_path.to_string_lossy().into_owned();
+        let root_cli = parse_ok(&["codewhale", "--config", &config]);
+        let root_command = build_tui_command(&root_cli, &resolved, Vec::new())
+            .expect("root launch should reach the TUI command boundary");
+        let root_args = root_command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(
+            root_args
+                .windows(2)
+                .any(|args| args == ["--config", &config])
+        );
+        assert_eq!(command_env(&root_command, "CODEWHALE_PROVIDER"), None);
+        assert_eq!(command_env(&root_command, "DEEPSEEK_PROVIDER"), None);
+
         let cli = parse_ok(&[
             "codewhale",
             "--config",

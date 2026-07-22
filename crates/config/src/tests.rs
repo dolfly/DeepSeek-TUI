@@ -2949,6 +2949,29 @@ fn load_project_config_rejects_symlinked_primary_config() {
     );
 }
 
+#[test]
+fn load_project_config_keeps_unknown_provider_names_strict() {
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let config_dir = workspace.path().join(CODEWHALE_APP_DIR);
+    fs::create_dir_all(&config_dir).expect("mkdir project config");
+    fs::write(
+        config_dir.join(CONFIG_FILE_NAME),
+        r#"provider = "opencode_zen"
+model = "must-not-apply"
+
+[providers.opencode_zen]
+kind = "openai-compatible"
+base_url = "https://opencode.example/v1"
+"#,
+    )
+    .expect("write project config");
+
+    assert!(
+        load_project_config(workspace.path()).is_none(),
+        "project overlays must not gain named-provider authority"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn load_sibling_permissions_rejects_symlink_file() {
@@ -3662,6 +3685,90 @@ fn unknown_provider_error_lists_huggingface() {
     let message = err.to_string();
     assert!(message.contains("unknown provider 'not-a-provider'"));
     assert!(message.contains("huggingface"));
+}
+
+#[test]
+fn config_store_preserves_named_custom_provider_identity_across_typed_dispatch_reads() {
+    let _lock = env_lock();
+    let _env = EnvGuard::without_deepseek_runtime_overrides();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    fs::write(
+        &path,
+        r#"# written by the TUI custom-provider flow
+provider = "opencode_zen"
+
+[providers.opencode_zen]
+kind = "openai-compatible"
+base_url = "https://opencode.example/v1"
+model = "deepseek-v4-flash-free"
+api_key_env = "OPENCODE_ZEN_API_KEY"
+"#,
+    )
+    .expect("custom provider fixture");
+
+    let mut store = ConfigStore::load(Some(path.clone())).expect("dispatcher config should load");
+    assert_eq!(store.config.provider, ProviderKind::Custom);
+    assert_eq!(store.config.provider_id(), "opencode_zen");
+    assert_eq!(
+        store.config.get_value("provider").as_deref(),
+        Some("opencode_zen")
+    );
+    assert_eq!(
+        store
+            .config
+            .list_values()
+            .get("provider")
+            .map(String::as_str),
+        Some("opencode_zen")
+    );
+
+    let resolved = store
+        .config
+        .resolve_runtime_options(&CliRuntimeOverrides::default());
+    assert_eq!(resolved.provider, ProviderKind::Custom);
+    assert_eq!(resolved.provider_source, ProviderSource::Config);
+    assert_eq!(resolved.base_url, "https://opencode.example/v1");
+    assert_eq!(resolved.model, "deepseek-v4-flash-free");
+
+    store
+        .config
+        .set_value("telemetry", "false")
+        .expect("unrelated typed mutation");
+    let rendered = store
+        .rendered_body()
+        .expect("render custom provider config");
+    assert!(
+        rendered.contains("provider = \"opencode_zen\""),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("provider = \"custom\""), "{rendered}");
+    assert!(!rendered.contains("[providers.custom]"), "{rendered}");
+
+    store.save().expect("save custom provider config");
+    let reloaded = ConfigStore::load(Some(path)).expect("reload custom provider config");
+    assert_eq!(reloaded.config.provider_id(), "opencode_zen");
+}
+
+#[test]
+fn named_custom_root_provider_requires_a_matching_openai_compatible_table() {
+    for body in [
+        "provider = \"opencode_zen\"\n",
+        r#"provider = "opencode_zen"
+
+[providers.opencode_zen]
+kind = "anthropic-messages"
+base_url = "https://opencode.example/v1"
+"#,
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        fs::write(&path, body).expect("invalid custom provider fixture");
+        let err = ConfigStore::load(Some(path)).expect_err("invalid custom route should fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("opencode_zen"), "{message}");
+        assert!(message.contains("openai-compatible") || message.contains("matching"));
+    }
 }
 
 #[test]

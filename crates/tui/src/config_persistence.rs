@@ -817,6 +817,14 @@ mod tests {
         );
         assert_eq!(entry.model.as_deref(), Some("acme/code-1"));
         assert_eq!(entry.api_key_env.as_deref(), Some("ACME_API_KEY"));
+
+        let dispatcher = codewhale_config::ConfigStore::load(Some(written))
+            .expect("the dispatcher must parse the exact config written by the TUI");
+        assert_eq!(
+            dispatcher.config.provider,
+            codewhale_config::ProviderKind::Custom
+        );
+        assert_eq!(dispatcher.config.provider_id(), "acme_ai");
     }
 
     #[test]
