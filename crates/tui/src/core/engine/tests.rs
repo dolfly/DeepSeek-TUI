@@ -4940,9 +4940,51 @@ fn core_native_tools_stay_loaded_in_yolo_mode() {
     for canonical in ["File", "Git", "Run"] {
         assert!(!should_default_defer_tool(canonical, &always_load));
     }
-    assert!(default_active_native_tool_names().len() <= 10);
     // Legacy spellings remain registered for replay but are no longer eager.
     assert!(should_default_defer_tool("git_blame", &always_load));
+}
+
+#[test]
+fn default_active_contract_keeps_remember_and_synthetic_tool_search_eager() {
+    const EXPECTED_NATIVE: [&str; 9] = [
+        "Bash",
+        "File",
+        "Git",
+        "Run",
+        "agent",
+        "remember",
+        "tasks",
+        "update_plan",
+        "work_update",
+    ];
+    assert_eq!(
+        default_active_native_tool_names(),
+        EXPECTED_NATIVE.as_slice()
+    );
+
+    let always_load = HashSet::new();
+    let mut catalog = build_model_tool_catalog(
+        EXPECTED_NATIVE.into_iter().map(api_tool).collect(),
+        Vec::new(),
+        AppMode::Agent,
+        &always_load,
+    );
+    ensure_advanced_tooling(&mut catalog, AppMode::Agent, &always_load);
+    let active = initial_active_tools(&catalog);
+    let expected = EXPECTED_NATIVE
+        .into_iter()
+        .chain([TOOL_SEARCH_NAME])
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+
+    assert_eq!(active, expected);
+    assert_eq!(
+        catalog
+            .iter()
+            .find(|tool| tool.name == TOOL_SEARCH_NAME)
+            .and_then(|tool| tool.defer_loading),
+        Some(false)
+    );
 }
 
 #[test]
@@ -5361,6 +5403,9 @@ fn print_agent_tool_catalog_metrics() {
     );
     let registry = crate::tools::ToolRegistryBuilder::new()
         .with_agent_tools(true)
+        // Exercise the complete default-active policy. Production registers
+        // this opt-in tool only when user memory is enabled.
+        .with_remember_tool()
         .with_todo_tool(new_shared_todo_list())
         .with_plan_tool(new_shared_plan_state())
         .with_review_tool(None, DEFAULT_TEXT_MODEL.to_string())

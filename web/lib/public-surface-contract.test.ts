@@ -346,7 +346,7 @@ done
     }
   });
 
-  it("enforces the nine-tool canonical surface and replay-only aliases", () => {
+  it("enforces the ten-tool default-active policy and replay-only aliases", () => {
     const toolDoc = text("docs/TOOL_SURFACE.md");
     const design = text("docs/RUNTIME_SIMPLIFICATION_DESIGN.md").replace(/\s+/g, " ");
     const toolsPage = text("web/app/[locale]/docs/tools/page.tsx");
@@ -360,6 +360,7 @@ done
       "Git",
       "Run",
       "agent",
+      "remember",
       "tasks",
       "update_plan",
       "work_update",
@@ -390,7 +391,7 @@ done
       roadmap.indexOf('title: "Underway"'),
     );
     expect(roadmap).toContain("Implemented in the v0.9.1 source candidate");
-    expect(toolDoc).toContain("exactly these nine names");
+    expect(toolDoc).toContain("exactly these ten names");
     for (const name of matrix.toolSurface.defaultActive) {
       expect(toolDoc, name).toContain(`\`${name}\``);
       expect(toolsPage, name).toContain(name);
@@ -398,7 +399,7 @@ done
     expect(toolDoc).toContain("`Web` is a conditional, deferred action tool");
     expect(toolDoc).toContain("hidden from the model");
     expect(design).toContain(
-      "The final active names are `Bash`, `File`, `Git`, `Run`, `agent`, `tasks`, `update_plan`, `work_update`, and `tool_search`.",
+      "The final active names are `Bash`, `File`, `Git`, `Run`, `agent`, `remember`, `tasks`, `update_plan`, `work_update`, and `tool_search`.",
     );
     expect(registry).toContain('FileTool::new("File")');
     expect(registry).toContain('GitTool::new("Git")');

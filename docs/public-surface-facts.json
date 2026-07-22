@@ -62,7 +62,7 @@
     "sources": ["docs/MODES.md", "docs/KEYBINDINGS.md", "crates/tui/src/settings.rs"]
   },
   "toolSurface": {
-    "defaultActive": ["Bash", "File", "Git", "Run", "agent", "tasks", "update_plan", "work_update", "tool_search"],
+    "defaultActive": ["Bash", "File", "Git", "Run", "agent", "remember", "tasks", "update_plan", "work_update", "tool_search"],
     "actions": {
       "Bash": ["run", "wait", "interact", "cancel"],
       "File": ["read", "list", "search_name", "search_content", "write", "edit", "patch"],

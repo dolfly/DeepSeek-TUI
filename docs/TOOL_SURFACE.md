@@ -15,17 +15,24 @@ Implementation sources:
 
 ## Default-active contract
 
-The default model-facing surface contains exactly these nine names:
+The default-active policy contains exactly these ten names:
 
 1. `Bash`
 2. `File`
 3. `Git`
 4. `Run`
 5. `agent`
-6. `tasks`
-7. `update_plan`
-8. `work_update`
-9. `tool_search`
+6. `remember`
+7. `tasks`
+8. `update_plan`
+9. `work_update`
+10. `tool_search`
+
+`remember` is registered only when the user enables the built-in memory path;
+once present, it stays eager so a model can capture a durable preference without
+first discovering the tool. A memory-disabled or Moraine-fallback runtime omits
+that registration and therefore exposes nine of the ten policy names.
+`tool_search` is synthetic rather than registry-backed and is always active.
 
 The surface is action-based. A model calls one stable tool name and selects the
 operation through its `action` field instead of choosing among many synonymous
@@ -56,6 +63,7 @@ by the former spellings remain in force.
 | Tool | Purpose |
 |---|---|
 | `agent` | Dispatch one focused sub-agent run and return an id, compact receipt, and transcript handle. |
+| `remember` | Append one terse durable preference or convention when the user has enabled built-in memory. |
 | `tasks` | Create, list, read, cancel, gate, and inspect durable task work through one action family. |
 | `update_plan` | Publish optional high-level strategy, phases, constraints, verification, and handoff context. |
 | `work_update` | Replace the concrete To-do / Work progress projection for the active thread or durable task. |
@@ -69,7 +77,7 @@ to the user.
 
 `Web` is a conditional, deferred action tool with `search`, `fetch`, and `wait`
 actions. It is discoverable through `tool_search` only when the active network
-policy and runtime backend permit it; it is not one of the nine default-active
+policy and runtime backend permit it; it is not one of the ten default-active
 names.
 
 The durable `github`, `automation`, and `rlm` action families are also deferred
@@ -162,7 +170,8 @@ cargo test -p codewhale-tui --bin codewhale-tui --locked shell_alias_tools_hidde
 cargo test -p codewhale-tui --bin codewhale-tui --locked runtime_task_families_expose_canonical_tools_with_hidden_aliases
 ```
 
-The provider-free runtime receipt must report the nine default-active names
-listed above. A separate repository-wide tool count may include deferred,
-dynamic, feature-gated, and replay-only registrations; it is not the number of
-tools placed in the first-turn model catalog.
+The provider-free full-policy receipt enables built-in memory and must report the
+ten default-active names listed above. A memory-disabled receipt truthfully omits
+`remember`. A separate repository-wide tool count may include deferred, dynamic,
+feature-gated, and replay-only registrations; it is not the number of tools
+placed in the first-turn model catalog.
