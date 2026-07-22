@@ -1043,6 +1043,16 @@ fn render_jump_to_latest_button(
 }
 
 const COMPOSER_PROMPT_GUTTER_WIDTH: u16 = 2;
+const COMPOSER_PANEL_MIN_WIDTH: u16 = 12;
+
+/// Whether the outer composer rect can carry both semantic border rows.
+///
+/// Keep this policy in outer-area coordinates. Input wrapping subtracts the
+/// prompt gutter later; using that narrower text width here made 12- and
+/// 13-column composers render as panels after reserving only the quiet rule.
+fn enclosed_composer_panel_fits(show_panel: bool, area_width: u16, area_height: u16) -> bool {
+    show_panel && area_height >= 3 && area_width >= COMPOSER_PANEL_MIN_WIDTH
+}
 
 /// Canonical horizontal geometry for composer input text.
 ///
@@ -1169,7 +1179,7 @@ impl<'a> ComposerWidget<'a> {
     }
 
     pub(crate) fn has_panel(&self, area: Rect) -> bool {
-        self.wants_enclosed_panel() && area.height >= 3 && area.width >= 12
+        enclosed_composer_panel_fits(self.wants_enclosed_panel(), area.width, area.height)
     }
 
     fn inner_area(&self, area: Rect) -> Rect {
@@ -1748,7 +1758,7 @@ impl Renderable for ComposerWidget<'_> {
     fn desired_height(&self, width: u16) -> u16 {
         composer_height(
             self.app.composer_display_input(),
-            width.saturating_sub(2),
+            width,
             self.max_height.min(self.max_height_cap()),
             self.active_menu_reserved_rows(),
             self.app.composer_density,
@@ -3444,14 +3454,18 @@ fn composer_max_height(density: ComposerDensity) -> u16 {
 
 fn composer_height(
     input: &str,
-    width: u16,
+    area_width: u16,
     available_height: u16,
     extra_lines: usize,
     density: ComposerDensity,
     show_panel: bool,
 ) -> u16 {
-    let has_panel = show_panel && available_height >= 3 && width >= 12;
-    let content_width = usize::from(width.max(1));
+    let has_panel = enclosed_composer_panel_fits(show_panel, area_width, available_height);
+    let content_width = usize::from(
+        area_width
+            .saturating_sub(COMPOSER_PROMPT_GUTTER_WIDTH)
+            .max(1),
+    );
     let mut line_count = wrap_input_lines(input, content_width).len();
     if line_count == 0 {
         line_count = 1;
@@ -4263,16 +4277,16 @@ fn line_spans_with_selection<'a>(
 mod tests {
     use super::{
         ACTIVE_REVISION_DOMAIN, ApprovalMode, ApprovalWidget, COMPOSER_PANEL_HEIGHT,
-        COMPOSER_PLACEHOLDER, ChatWidget, ComposerWidget, Renderable, SlashMenuEntry,
-        active_entry_revision, ambient_ping_pong, apply_detail_target_highlight,
+        COMPOSER_PLACEHOLDER, COMPOSER_PROMPT_GUTTER_WIDTH, ChatWidget, ComposerWidget, Renderable,
+        SlashMenuEntry, active_entry_revision, ambient_ping_pong, apply_detail_target_highlight,
         apply_selection_to_line, apply_send_flash, approval_palette, approval_truncation_hint,
         build_empty_state_lines, composer_content_geometry, composer_empty_hint_text,
         composer_height, composer_max_height, composer_min_input_rows, composer_top_padding,
-        cursor_row_col, empty_composer_visual_rows, fish_flee_offset, fish_heading, fish_mark,
-        history_entry_revision, layout_input, layout_input_with_scroll, pad_lines_to_bottom,
-        placeholder_visual_lines, push_command_entry, receipt_is_settling, revision_in_domain,
-        should_render_empty_state, slash_completion_hints, tool_run_summary_revision,
-        wrap_input_lines, wrap_input_lines_for_mouse, wrap_text,
+        cursor_row_col, empty_composer_visual_rows, enclosed_composer_panel_fits, fish_flee_offset,
+        fish_heading, fish_mark, history_entry_revision, layout_input, layout_input_with_scroll,
+        pad_lines_to_bottom, placeholder_visual_lines, push_command_entry, receipt_is_settling,
+        revision_in_domain, should_render_empty_state, slash_completion_hints,
+        tool_run_summary_revision, wrap_input_lines, wrap_input_lines_for_mouse, wrap_text,
     };
     use crate::config::{ApiProvider, Config};
     use crate::localization::Locale;
@@ -5388,17 +5402,13 @@ mod tests {
             ComposerDensity::Comfortable,
             true,
         );
-        let has_panel = available_height >= 3 && width >= 12;
+        let has_panel = enclosed_composer_panel_fits(true, width, available_height);
         let chrome_height = if has_panel {
             usize::from(COMPOSER_PANEL_HEIGHT)
         } else {
-            0
+            1
         };
-        let content_width = if has_panel {
-            usize::from(width.saturating_sub(2).max(1))
-        } else {
-            usize::from(width.max(1))
-        };
+        let content_width = usize::from(width.saturating_sub(COMPOSER_PROMPT_GUTTER_WIDTH).max(1));
         let input_height_budget = usize::from(height)
             .saturating_sub(menu_lines)
             .saturating_sub(chrome_height)
@@ -5421,6 +5431,39 @@ mod tests {
     fn composer_height_prefers_panel_shape_when_space_allows() {
         let height = composer_height("", 40, 8, 0, ComposerDensity::Comfortable, true);
         assert_eq!(height, 5);
+    }
+
+    #[test]
+    fn composer_panel_height_and_render_policy_agree_at_width_boundary() {
+        let mut app = create_test_app();
+        app.composer_border = true;
+        app.composer_density = ComposerDensity::Comfortable;
+        let slash_menu_entries = Vec::<SlashMenuEntry>::new();
+        let mention_menu_entries = Vec::<String>::new();
+        let widget = ComposerWidget::new(&app, 8, &slash_menu_entries, &mention_menu_entries);
+
+        for (width, expected_panel, expected_height) in
+            [(11, false, 4), (12, true, 5), (13, true, 5), (14, true, 5)]
+        {
+            let height = widget.desired_height(width);
+            let area = Rect::new(0, 0, width, height);
+
+            assert_eq!(height, expected_height, "width={width}");
+            assert_eq!(widget.has_panel(area), expected_panel, "width={width}");
+            assert_eq!(
+                widget.inner_area(area).height,
+                3,
+                "width={width} must reserve every rendered border row"
+            );
+
+            let mut buf = Buffer::empty(area);
+            widget.render(area, &mut buf);
+            assert_eq!(
+                buf[(1, area.bottom().saturating_sub(1))].symbol() == "\u{2500}",
+                expected_panel,
+                "width={width} bottom border disagrees with height policy"
+            );
+        }
     }
 
     #[test]
