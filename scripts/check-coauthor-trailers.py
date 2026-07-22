@@ -82,6 +82,12 @@ PRESERVED_MAPPED_IDENTITY_EXCEPTIONS = {
         "fleitz",
         "fleitzo@gmail.com",
     ),
+    (
+        "338138eb546bcf8917b27395325f59af0d2e4f52",
+        "author",
+        "hunter b",
+        "hmbown@gmail.com",
+    ),
 }
 
 

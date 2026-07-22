@@ -169,6 +169,34 @@ class CheckCoauthorTrailersTests(unittest.TestCase):
         self.assertTrue(errors)
         self.assertTrue(any("different@example.com" in error for error in errors))
 
+    def test_preserved_telecom_harvest_author_resolves_only_for_exact_commit(self) -> None:
+        preserved = mod.Commit(
+            sha="338138eb546bcf8917b27395325f59af0d2e4f52",
+            parents="parent",
+            author_name="Hunter B",
+            author_email="hmbown@gmail.com",
+            subject="feat(provider): add TelecomJS live catalog",
+            body=(
+                "Harvested from PR #4370 by @baendlorel.\n\n"
+                "Co-authored-by: baendlorel "
+                "<50111870+baendlorel@users.noreply.github.com>"
+            ),
+        )
+        errors = mod.validate([preserved], self.aliases, True)
+        self.assertEqual(errors, [])
+
+        rewritten = mod.Commit(
+            sha="deadbeef" * 5,
+            parents=preserved.parents,
+            author_name=preserved.author_name,
+            author_email=preserved.author_email,
+            subject=preserved.subject,
+            body=preserved.body,
+        )
+        errors = mod.validate([rewritten], self.aliases, True)
+        self.assertTrue(errors)
+        self.assertTrue(any("not canonical" in error for error in errors))
+
 
 if __name__ == "__main__":
     raise SystemExit(unittest.main())
