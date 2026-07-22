@@ -516,18 +516,27 @@ fn spacer_rows_between(
         transcript_boundary(
             current.kind,
             next.kind,
-            current.is_tool_groupable && next.is_tool_groupable,
+            same_tool_activity_group(current, next),
         ),
         spacing,
     )
 }
 
+/// Adjacent tool cells share one rail only when they represent the same kind
+/// of activity. Durable Work receipts are persisted state, not another
+/// transient action, so crossing that semantic seam closes the current rail
+/// even at compact density where no blank row is available.
+fn same_tool_activity_group(current: &CachedCell, next: &CachedCell) -> bool {
+    current.is_tool_groupable && next.is_tool_groupable && current.kind == next.kind
+}
+
 fn transcript_boundary(
     current: TranscriptBlockKind,
     next: TranscriptBlockKind,
-    adjacent_tool_cells: bool,
+    same_tool_group: bool,
 ) -> TranscriptBoundary {
-    if adjacent_tool_cells {
+    if same_tool_group {
+        debug_assert_eq!(current, next);
         return TranscriptBoundary::Joined;
     }
 
@@ -592,12 +601,12 @@ fn tool_group_rail(
         return None;
     }
 
-    let previous_is_tool =
-        previous_visible_cell(cells, cell_index).is_some_and(|cell| cell.is_tool_groupable);
-    let next_is_tool =
-        next_visible_cell(cells, cell_index).is_some_and(|cell| cell.is_tool_groupable);
-    let first_line_in_group = !previous_is_tool && line_in_cell == 0;
-    let last_line_in_group = !next_is_tool && line_in_cell + 1 == rendered_line_count;
+    let previous_shares_group = previous_visible_cell(cells, cell_index)
+        .is_some_and(|previous| same_tool_activity_group(previous, cached));
+    let next_shares_group = next_visible_cell(cells, cell_index)
+        .is_some_and(|next| same_tool_activity_group(cached, next));
+    let first_line_in_group = !previous_shares_group && line_in_cell == 0;
+    let last_line_in_group = !next_shares_group && line_in_cell + 1 == rendered_line_count;
 
     let rail = match (first_line_in_group, last_line_in_group) {
         (true, true) if rendered_line_count == 1 => {
@@ -1202,7 +1211,9 @@ mod tests {
             (Answer, ToolAction, false, Activity),
             (ToolAction, Reasoning, false, Activity),
             (Notice, DurableWork, false, Activity),
-            (ToolAction, DurableWork, true, Joined),
+            (ToolAction, ToolAction, true, Joined),
+            (DurableWork, DurableWork, true, Joined),
+            (ToolAction, DurableWork, false, Activity),
         ];
 
         for (current, next, grouped_tools, expected) in cases {
@@ -1251,6 +1262,93 @@ mod tests {
         assert_eq!(
             TranscriptBlockKind::for_cell(&tool),
             TranscriptBlockKind::ToolAction
+        );
+    }
+
+    #[test]
+    fn durable_work_starts_a_new_activity_rail_without_wasting_compact_rows() {
+        let durable = HistoryCell::Tool(ToolCell::PlanUpdate(PlanUpdateCell {
+            snapshot: PlanSnapshot {
+                objective: Some("Keep the release receipt durable".to_string()),
+                ..PlanSnapshot::default()
+            },
+            status: ToolStatus::Running,
+        }));
+        let cells = vec![
+            exec_tool_cell("cargo test --locked"),
+            exec_tool_cell("cargo clippy --locked"),
+            durable,
+        ];
+        let revisions = vec![1u64; cells.len()];
+
+        let mut compact = TranscriptViewCache::new();
+        compact.ensure(
+            &cells,
+            &revisions,
+            80,
+            TranscriptRenderOptions {
+                spacing: TranscriptSpacing::Compact,
+                low_motion: true,
+                ..TranscriptRenderOptions::default()
+            },
+        );
+
+        assert_eq!(spacer_rows_after_cell(&compact, 0), 0);
+        assert_eq!(spacer_rows_after_cell(&compact, 1), 0);
+        let compact_lines = plain_lines(&compact);
+        assert!(
+            !compact_lines.iter().any(String::is_empty),
+            "compact activity seams must not spend a blank row: {compact_lines:?}"
+        );
+        let lines_for_cell = |target| {
+            compact
+                .lines()
+                .iter()
+                .zip(compact.line_meta())
+                .filter_map(|(line, meta)| match meta {
+                    TranscriptLineMeta::CellLine { cell_index, .. } if *cell_index == target => {
+                        Some(
+                            line.spans
+                                .iter()
+                                .map(|span| span.content.as_ref())
+                                .collect::<String>(),
+                        )
+                    }
+                    TranscriptLineMeta::Spacer | TranscriptLineMeta::CellLine { .. } => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let second_action = lines_for_cell(1);
+        let durable_work = lines_for_cell(2);
+        assert!(
+            second_action
+                .last()
+                .is_some_and(|line| line.starts_with("\u{2570} ")),
+            "ordinary action rail should close before durable Work: {second_action:?}"
+        );
+        assert!(
+            durable_work
+                .first()
+                .is_some_and(|line| line.starts_with("\u{256D} ")),
+            "durable Work should open its own rail: {durable_work:?}"
+        );
+
+        let mut comfortable = TranscriptViewCache::new();
+        comfortable.ensure(
+            &cells,
+            &revisions,
+            80,
+            TranscriptRenderOptions {
+                spacing: TranscriptSpacing::Comfortable,
+                low_motion: true,
+                ..TranscriptRenderOptions::default()
+            },
+        );
+        assert_eq!(spacer_rows_after_cell(&comfortable, 0), 0);
+        assert_eq!(
+            spacer_rows_after_cell(&comfortable, 1),
+            1,
+            "durable Work needs a semantic activity row outside compact density"
         );
     }
 
@@ -1386,7 +1484,7 @@ mod tests {
             user_cell("Proceed to the final verification."),
         ];
         let revisions = vec![1u64; cells.len()];
-        let expected = [1, 0, 1, 0, 1, 1, 0];
+        let expected = [1, 0, 1, 1, 1, 1, 0];
 
         for width in [40, 80, 100, 140] {
             for low_motion in [false, true] {
