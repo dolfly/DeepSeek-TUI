@@ -202,6 +202,8 @@ pub struct FleetLedger {
     lock_path: PathBuf,
     #[cfg(test)]
     fail_start_append_after_callback: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    fail_restart_append_after_callback: std::sync::atomic::AtomicBool,
 }
 
 impl FleetLedger {
@@ -229,6 +231,8 @@ impl FleetLedger {
             lock_path,
             #[cfg(test)]
             fail_start_append_after_callback: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_restart_append_after_callback: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -239,6 +243,12 @@ impl FleetLedger {
     #[cfg(test)]
     pub(crate) fn fail_next_start_append_after_callback(&self) {
         self.fail_start_append_after_callback
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_restart_append_after_callback(&self) {
+        self.fail_restart_append_after_callback
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
@@ -891,7 +901,42 @@ impl FleetLedger {
         lease_expires_at: Option<&str>,
         restart_count: u32,
     ) -> Result<bool> {
-        self.with_write_lock(|| {
+        self.restart_task_if_unchanged_with_callback(
+            run_id,
+            task_id,
+            worker_id,
+            expected_status,
+            expected_attempts,
+            expected_latest_seq,
+            expected_heartbeat_at,
+            leased_at,
+            lease_expires_at,
+            restart_count,
+            || Ok(()),
+        )
+    }
+
+    /// Restart the observed attempt while persisting its replacement launch
+    /// identity before the new lease becomes visible. This mirrors
+    /// `start_task_if_enqueued`: a failed callback leaves the old attempt
+    /// untouched, so no leased generation can exist without a matching
+    /// durable launch manifest.
+    #[allow(clippy::too_many_arguments)]
+    pub fn restart_task_if_unchanged_with_callback(
+        &self,
+        run_id: &FleetRunId,
+        task_id: &str,
+        worker_id: &str,
+        expected_status: FleetTaskLedgerStatus,
+        expected_attempts: u32,
+        expected_latest_seq: u64,
+        expected_heartbeat_at: Option<&str>,
+        leased_at: &str,
+        lease_expires_at: Option<&str>,
+        restart_count: u32,
+        on_restarted: impl FnOnce() -> Result<()>,
+    ) -> Result<bool> {
+        self.with_write_lock(move || {
             let state = self.rebuild_state_unlocked()?;
             let key = task_key(&run_id.0, task_id);
             let Some(task) = state.tasks.get(&key) else {
@@ -937,6 +982,14 @@ impl FleetLedger {
                 payload: FleetWorkerEventPayload::Running,
                 extra: BTreeMap::new(),
             };
+            on_restarted()?;
+            #[cfg(test)]
+            if self
+                .fail_restart_append_after_callback
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                bail!("forced Fleet restart ledger append failure after coordination callback");
+            }
             self.append_records_unlocked(&[
                 FleetLedgerRecord::TaskLeased {
                     run_id: run_id.clone(),

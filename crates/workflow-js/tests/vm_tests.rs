@@ -207,13 +207,12 @@ async fn task_write_paths_normalize_and_reject_escape_spellings() {
 }
 
 #[tokio::test]
-async fn task_explicit_write_roles_fail_closed_without_scope_and_reject_contradictions() {
+async fn task_explicit_write_roles_fail_closed_without_scope_and_reject_write_escalation() {
     for source in [
         r#"return await task({prompt: "no scope", type: "implementer"});"#,
         r#"return await task({prompt: "no scope", type: "general"});"#,
         r#"return await task({prompt: "no scope", profile: "release-lead"});"#,
         r#"return await task({prompt: "wrong authority", type: "reviewer", writeAuthority: "workspace_write", writeRoots: ["src"]});"#,
-        r#"return await task({prompt: "wrong role", type: "implementer", writeAuthority: "read_only"});"#,
         r#"return await task({prompt: "role conflict", type: "implementer", role: "reviewer", writeRoots: ["src"]});"#,
     ] {
         let driver = Arc::new(FakeDriver::new());
@@ -226,6 +225,23 @@ async fn task_explicit_write_roles_fail_closed_without_scope_and_reject_contradi
         );
         assert!(driver.requests().is_empty());
     }
+}
+
+#[tokio::test]
+async fn task_implementer_identity_can_be_narrowed_to_read_only_authority() {
+    let driver = Arc::new(FakeDriver::new());
+    let value = run(
+        &driver,
+        r#"return await task({prompt: "verification-only plan", type: "implementer", writeAuthority: "read_only"});"#,
+        json!(null),
+    )
+    .await
+    .expect("read-only authority must safely narrow an implementer identity");
+    assert_eq!(value, json!("done:verification-only plan"));
+    let request = driver.requests().pop().expect("request");
+    assert_eq!(request.subagent_type.as_deref(), Some("implementer"));
+    assert_eq!(request.write_authority.as_deref(), Some("read_only"));
+    assert!(request.write_roots.is_empty());
 }
 
 #[tokio::test]

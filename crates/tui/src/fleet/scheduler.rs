@@ -65,9 +65,10 @@ impl FleetScheduler {
         self.now = now;
     }
 
+    #[cfg(test)]
     pub fn tick_run(&self, run_id: &FleetRunId) -> Result<FleetSchedulerReport> {
         let mut report = FleetSchedulerReport::default();
-        self.recover_unhealthy_work(run_id, &mut report)?;
+        self.recover_unhealthy_work(run_id, &mut report, &mut |_, _, _, _| Ok(()))?;
         self.launch_queued_work(run_id, &mut report)?;
         self.refresh_run_status(run_id)?;
         Ok(report)
@@ -82,9 +83,23 @@ impl FleetScheduler {
     /// and idempotent to call on a fresh process: a task re-leased by an
     /// earlier resume is no longer stale at the same instant, and a terminally
     /// failed task is never failed or escalated twice.
+    #[cfg(test)]
     pub fn resume_run(&self, run_id: &FleetRunId) -> Result<FleetSchedulerReport> {
+        self.resume_run_with_restart_callback(run_id, |_, _, _, _| Ok(()))
+    }
+
+    pub(crate) fn resume_run_with_restart_callback(
+        &self,
+        run_id: &FleetRunId,
+        mut on_restarting: impl FnMut(
+            &FleetLedgerState,
+            &FleetTaskState,
+            &FleetTaskSpec,
+            &str,
+        ) -> Result<()>,
+    ) -> Result<FleetSchedulerReport> {
         let mut report = FleetSchedulerReport::default();
-        self.reconcile_stale_leases(run_id, &mut report)?;
+        self.reconcile_stale_leases(run_id, &mut report, &mut on_restarting)?;
         self.refresh_run_status(run_id)?;
         Ok(report)
     }
@@ -123,6 +138,12 @@ impl FleetScheduler {
         &self,
         run_id: &FleetRunId,
         report: &mut FleetSchedulerReport,
+        on_restarting: &mut dyn FnMut(
+            &FleetLedgerState,
+            &FleetTaskState,
+            &FleetTaskSpec,
+            &str,
+        ) -> Result<()>,
     ) -> Result<()> {
         let state = self.ledger.rebuild_state()?;
         for task in state
@@ -168,12 +189,14 @@ impl FleetScheduler {
                     };
                     report.marked_stale += 1;
                     self.retry_or_fail(
+                        &state,
                         task,
                         &task_spec,
                         &worker_id,
                         stale_event.seq,
                         heartbeat_at,
                         report,
+                        on_restarting,
                     )
                     .with_context(|| format!("recovering stale task {}", task.entry.task_id))?;
                 }
@@ -195,12 +218,14 @@ impl FleetScheduler {
                         .get(&worker_id)
                         .map(|heartbeat| heartbeat.timestamp.as_str());
                     self.retry_or_fail(
+                        &state,
                         task,
                         &task_spec,
                         &worker_id,
                         latest_seq,
                         heartbeat_at,
                         report,
+                        on_restarting,
                     )
                     .with_context(|| format!("recovering failed task {}", task.entry.task_id))?;
                 }
@@ -219,6 +244,12 @@ impl FleetScheduler {
         &self,
         run_id: &FleetRunId,
         report: &mut FleetSchedulerReport,
+        on_restarting: &mut dyn FnMut(
+            &FleetLedgerState,
+            &FleetTaskState,
+            &FleetTaskSpec,
+            &str,
+        ) -> Result<()>,
     ) -> Result<()> {
         let state = self.ledger.rebuild_state()?;
         for task in state
@@ -267,12 +298,14 @@ impl FleetScheduler {
             };
             report.marked_stale += 1;
             self.retry_or_fail(
+                &state,
                 task,
                 &task_spec,
                 &worker_id,
                 stale_event.seq,
                 heartbeat_at,
                 report,
+                on_restarting,
             )
             .with_context(|| format!("resuming stale task {}", task.entry.task_id))?;
         }
@@ -281,17 +314,24 @@ impl FleetScheduler {
 
     fn retry_or_fail(
         &self,
+        state: &FleetLedgerState,
         task: &FleetTaskState,
         task_spec: &FleetTaskSpec,
         worker_id: &str,
         expected_latest_seq: u64,
         expected_heartbeat_at: Option<&str>,
         report: &mut FleetSchedulerReport,
+        on_restarting: &mut dyn FnMut(
+            &FleetLedgerState,
+            &FleetTaskState,
+            &FleetTaskSpec,
+            &str,
+        ) -> Result<()>,
     ) -> Result<()> {
         let retry_policy = task_spec.retry_policy.clone().unwrap_or_default();
         if task.entry.attempts < retry_policy.max_attempts {
             let lease_expires_at = self.lease_expires_at();
-            if !self.ledger.restart_task_if_unchanged(
+            if !self.ledger.restart_task_if_unchanged_with_callback(
                 &task.entry.run_id,
                 &task.entry.task_id,
                 worker_id,
@@ -302,6 +342,7 @@ impl FleetScheduler {
                 &self.timestamp(),
                 Some(&lease_expires_at),
                 task.entry.attempts,
+                || on_restarting(state, task, task_spec, worker_id),
             )? {
                 return Ok(());
             }

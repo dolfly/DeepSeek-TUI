@@ -1354,6 +1354,8 @@ struct StructuredPlanChild {
     profile: Option<String>,
     #[serde(default)]
     mode: Option<String>,
+    #[serde(default)]
+    file_scope: Vec<String>,
 }
 
 fn structured_plan_to_workflow_spec(plan_value: &Value) -> Result<WorkflowSpec, ToolError> {
@@ -1578,7 +1580,7 @@ fn plan_children_to_leaves(
             profile,
             mode,
             isolation: Default::default(),
-            file_scope: Vec::new(),
+            file_scope: child.file_scope.clone(),
             depends_on_results: Vec::new(),
             budget: BudgetSpec {
                 max_tokens: token_budget,
@@ -1844,13 +1846,15 @@ impl DeclarativeWorkflowLowerer {
                     "{} + \"\\n\\nInputs:\\n\" + {inputs}",
                     js_string(&spec.prompt)
                 ),
-                Some("general"),
+                Some("plan"),
                 None,
                 None,
                 false,
                 None,
                 None,
                 None,
+                Some("read_only"),
+                &[],
                 &spec.id,
                 Some("reduce"),
                 None,
@@ -1915,6 +1919,20 @@ fn leaf_task_options_expression(
     parallel: bool,
 ) -> Result<String, ToolError> {
     validate_leaf_runtime_contract(spec)?;
+    let worktree = leaf_wants_worktree(spec, parallel);
+    let write_authority = match spec.mode {
+        TaskMode::ReadOnly => "read_only",
+        TaskMode::ReadWrite if worktree => "worktree_write",
+        TaskMode::ReadWrite => "workspace_write",
+    };
+    let write_roots = if spec.mode == TaskMode::ReadWrite {
+        spec.file_scope
+            .iter()
+            .map(|scope| codewhale_workflow::normalize_file_scope_root(scope))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     Ok(task_options_expression(
         leaf_description_expression(spec),
         leaf_subagent_type(spec),
@@ -1922,10 +1940,12 @@ fn leaf_task_options_expression(
         spec.profile.as_deref(),
         // Parallel write-capable children default to worktree isolation (#4120).
         // Explicit isolation: shared is the approved same-worktree override.
-        leaf_wants_worktree(spec, parallel),
+        worktree,
         spec.budget.max_tokens,
         spec.budget.max_steps,
         spec.budget.timeout_secs,
+        Some(write_authority),
+        &write_roots,
         &spec.id,
         phase,
         leaf_allowed_tools(spec)?,
@@ -1938,6 +1958,21 @@ fn validate_leaf_runtime_contract(spec: &LeafSpec) -> Result<(), ToolError> {
             "Workflow leaf '{}' is read_only but requests allow_write permissions",
             spec.id
         )));
+    }
+    if spec.mode == TaskMode::ReadWrite && spec.file_scope.is_empty() {
+        return Err(ToolError::invalid_input(format!(
+            "Workflow leaf '{}' is read_write but declares no file_scope for its bounded write claim",
+            spec.id
+        )));
+    }
+    for scope in &spec.file_scope {
+        let normalized = codewhale_workflow::normalize_file_scope_root(scope);
+        if normalized.is_empty() || normalized.contains('*') {
+            return Err(ToolError::invalid_input(format!(
+                "Workflow leaf '{}' has unsupported file_scope '{}'; use a concrete path or a trailing /* or /** directory scope",
+                spec.id, scope
+            )));
+        }
     }
     // A Fleet role and its authority posture are independent. In particular,
     // acceptance workflows must be able to resolve the `implementer` role to
@@ -2063,6 +2098,8 @@ fn task_options_expression(
     token_budget: Option<u64>,
     max_steps: Option<u32>,
     wall_time_secs: Option<u64>,
+    write_authority: Option<&str>,
+    write_roots: &[String],
     label: &str,
     phase: Option<&str>,
     allowed_tools: Option<Vec<String>>,
@@ -2092,6 +2129,15 @@ fn task_options_expression(
     }
     if let Some(wall_time_secs) = wall_time_secs {
         fields.push(format!("wallTimeSecs: {wall_time_secs}"));
+    }
+    if let Some(write_authority) = write_authority {
+        fields.push(format!("writeAuthority: {}", js_string(write_authority)));
+    }
+    if !write_roots.is_empty() {
+        fields.push(format!(
+            "writeRoots: {}",
+            serde_json::to_string(write_roots).expect("serializing write roots cannot fail")
+        ));
     }
     if let Some(allowed_tools) = allowed_tools {
         fields.push(format!(
@@ -4408,6 +4454,17 @@ export default workflow({
             "each parallel write child should get worktree: true:\n{}",
             adapted.source
         );
+        assert_eq!(
+            adapted
+                .source
+                .matches("writeAuthority: \"worktree_write\"")
+                .count(),
+            2,
+            "each isolated writer should carry enforced worktree authority:\n{}",
+            adapted.source
+        );
+        assert!(adapted.source.contains("writeRoots: [\"src/left.rs\"]"));
+        assert!(adapted.source.contains("writeRoots: [\"src/right.rs\"]"));
     }
 
     #[test]
@@ -4482,6 +4539,16 @@ export default workflow({
             "both children should still be lowered:\n{}",
             adapted.source
         );
+        assert!(
+            adapted
+                .source
+                .contains("writeAuthority: \"workspace_write\"")
+        );
+        assert!(
+            adapted
+                .source
+                .contains("writeAuthority: \"worktree_write\"")
+        );
     }
 
     #[test]
@@ -4523,6 +4590,15 @@ export default workflow({
             "read-only parallel children should not get worktree isolation:\n{}",
             adapted.source
         );
+        assert_eq!(
+            adapted
+                .source
+                .matches("writeAuthority: \"read_only\"")
+                .count(),
+            2,
+            "read-only mode must reach the task authority contract:\n{}",
+            adapted.source
+        );
     }
 
     #[test]
@@ -4556,6 +4632,78 @@ export default workflow({
             "sequential writes should not default to worktree:\n{}",
             adapted.source
         );
+        assert!(
+            adapted
+                .source
+                .contains("writeAuthority: \"workspace_write\"")
+        );
+        assert!(adapted.source.contains("writeRoots: [\"src/main.rs\"]"));
+    }
+
+    #[test]
+    fn write_scope_suffix_globs_lower_to_enforceable_roots() {
+        let source = r#"workflow({
+          "goal": "bounded auth patch",
+          "nodes": [{ "agent": {
+            "id": "writer",
+            "prompt": "Patch auth",
+            "agent_type": "implementer",
+            "mode": "read_write",
+            "file_scope": ["./src/auth/**"]
+          }}]
+        });"#;
+        let adapted = adapt_workflow_source(source, None).expect("lower trailing glob scope");
+        assert!(
+            adapted.source.contains("writeRoots: [\"src/auth\"]"),
+            "runtime claim must contain src/auth/login.rs:\n{}",
+            adapted.source
+        );
+
+        let unsupported = r#"workflow({
+          "goal": "reject ambiguous glob",
+          "nodes": [{ "agent": {
+            "id": "writer",
+            "prompt": "Patch auth",
+            "agent_type": "implementer",
+            "mode": "read_write",
+            "file_scope": ["src/*/auth"]
+          }}]
+        });"#;
+        let error = match adapt_workflow_source(unsupported, None) {
+            Ok(_) => panic!("internal globs cannot become literal runtime roots"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("unsupported file_scope"), "{error}");
+    }
+
+    #[test]
+    fn write_leaves_require_scope_and_reduce_stays_read_only() {
+        let unscoped_writer = r#"workflow({
+          "goal": "reject an unbounded writer",
+          "nodes": [{ "agent": {
+            "id": "writer",
+            "prompt": "Patch it",
+            "agent_type": "implementer",
+            "mode": "read_write"
+          }}]
+        });"#;
+        let error = match adapt_workflow_source(unscoped_writer, None) {
+            Ok(_) => panic!("write-capable leaves must declare file_scope"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("declares no file_scope"), "{error}");
+
+        let reduce = r#"workflow({
+          "goal": "reduce read-only evidence",
+          "nodes": [{ "reduce": {
+            "id": "summary",
+            "inputs": [],
+            "prompt": "Summarize the evidence"
+          }}]
+        });"#;
+        let adapted = adapt_workflow_source(reduce, None).expect("lower reduce");
+        assert!(adapted.source.contains("type: \"plan\""));
+        assert!(adapted.source.contains("writeAuthority: \"read_only\""));
     }
 
     #[test]

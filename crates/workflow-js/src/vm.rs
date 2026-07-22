@@ -796,11 +796,6 @@ fn parse_task_options(opts_json: &str) -> Result<TaskRequest, String> {
     {
         return Err("task(): read-only roles cannot declare write-capable authority".to_string());
     }
-    if declared_kind == Some(TaskRoleKind::Implementer)
-        && write_authority.as_deref() == Some("read_only")
-    {
-        return Err("task(): implementer cannot declare read_only authority".to_string());
-    }
     if write_authority
         .as_deref()
         .is_some_and(|authority| authority != "read_only")

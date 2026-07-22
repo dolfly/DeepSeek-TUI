@@ -470,6 +470,7 @@ fn agent_worker_profile_derives_from_parent_without_escalation() {
         &tool_profile,
         "deepseek-v4-pro",
         Some(ModelRoute::Fixed("deepseek-v4-pro".to_string())),
+        false,
     );
 
     assert_eq!(profile.role, SubAgentType::Implementer);
@@ -487,6 +488,72 @@ fn agent_worker_profile_derives_from_parent_without_escalation() {
         profile.tools,
         ToolScope::Explicit(vec!["read_file".to_string(), "write_file".to_string()])
     );
+}
+
+#[test]
+fn declared_read_only_write_roles_derive_without_mutating_shell() {
+    for input in [
+        json!({"prompt": "inspect only"}),
+        json!({
+            "prompt": "implementation review",
+            "type": "implementer",
+            "write_authority": "read_only"
+        }),
+    ] {
+        let request = parse_spawn_request(&input).expect("read-only spawn parses");
+        let mut runtime = stub_runtime().background_runtime();
+        apply_spawn_write_authority(&mut runtime, &request);
+        let profile = worker_profile_for_spawn(
+            &runtime,
+            &request.agent_type,
+            &AgentWorkerToolProfile::Inherited,
+            "deepseek-v4-pro",
+            None,
+            false,
+        );
+        assert!(!profile.permissions.write, "{request:?}");
+        assert_eq!(profile.shell, ShellPolicy::None, "{request:?}");
+    }
+}
+
+#[test]
+fn custom_runtime_opens_only_for_explicit_bounded_write_authority() {
+    let runtime = stub_runtime().background_runtime();
+    let tools = AgentWorkerToolProfile::Explicit(vec!["write_file".to_string()]);
+    let locked = worker_profile_for_spawn(
+        &runtime,
+        &SubAgentType::Custom,
+        &tools,
+        "deepseek-v4-pro",
+        None,
+        false,
+    );
+    assert!(!locked.permissions.write);
+    assert_eq!(locked.shell, ShellPolicy::None);
+
+    let opened = worker_profile_for_spawn(
+        &runtime,
+        &SubAgentType::Custom,
+        &tools,
+        "deepseek-v4-pro",
+        None,
+        true,
+    );
+    assert!(opened.permissions.write);
+    assert_eq!(opened.shell, ShellPolicy::Full);
+
+    let mut read_only_parent = runtime;
+    read_only_parent.worker_profile = WorkerRuntimeProfile::for_role(SubAgentType::Explore);
+    let intersected = worker_profile_for_spawn(
+        &read_only_parent,
+        &SubAgentType::Custom,
+        &tools,
+        "deepseek-v4-pro",
+        None,
+        true,
+    );
+    assert!(!intersected.permissions.write);
+    assert_eq!(intersected.shell, ShellPolicy::ReadOnly);
 }
 
 #[test]
@@ -1947,6 +2014,40 @@ fn declared_write_authority_parses_and_worktree_write_requires_isolation() {
     }))
     .expect("worktree_write with isolation parses");
     assert_eq!(ok.write_authority, Some(SpawnWriteAuthority::WorktreeWrite));
+
+    let custom_read_only = parse_spawn_request(&json!({
+        "prompt": "run a narrow reader",
+        "type": "custom",
+        "allowed_tools": ["read_file"]
+    }))
+    .expect("custom without explicit write authority stays read-only");
+    assert_eq!(
+        custom_read_only.write_authority,
+        Some(SpawnWriteAuthority::ReadOnly)
+    );
+
+    let custom_implicit_write = parse_spawn_request(&json!({
+        "prompt": "ambiguous custom writer",
+        "type": "custom",
+        "allowed_tools": ["write_file"],
+        "write_roots": ["src"]
+    }))
+    .expect_err("custom scopes require deliberate write authority")
+    .to_string();
+    assert!(
+        custom_implicit_write.contains("explicit"),
+        "{custom_implicit_write}"
+    );
+
+    let custom_writer = parse_spawn_request(&json!({
+        "prompt": "bounded custom writer",
+        "type": "custom",
+        "allowed_tools": ["write_file"],
+        "write_authority": "workspace_write",
+        "write_roots": ["src"]
+    }))
+    .expect("explicit bounded custom write parses");
+    assert!(spawn_request_is_write_capable(&custom_writer));
 }
 
 #[test]
@@ -1969,17 +2070,28 @@ fn prompt_only_general_children_default_read_only_instead_of_claiming_the_repo()
     for explicit in [
         json!({"prompt": "implement", "type": "implementer"}),
         json!({"prompt": "general but explicit", "type": "general"}),
-        json!({"prompt": "fleet role", "role": "release_lead"}),
     ] {
         let error = parse_spawn_request(&explicit)
             .expect_err("explicit write-capable identity must not silently become read-only")
             .to_string();
         assert!(error.contains("must declare"), "{error}");
     }
+
+    // Fleet roles are classified only after the live roster resolves them.
+    // A manager profile still fails closed before spawn when it has no scope.
+    let roster = FleetRoster::built_ins_only();
+    let mut fleet_role =
+        parse_spawn_request(&json!({"prompt": "fleet role", "role": "release_lead"}))
+            .expect("unresolved fleet role should parse");
+    apply_spawn_profile(&mut fleet_role, &roster).expect("release lead should resolve");
+    let error = validate_spawn_write_contract(&mut fleet_role, false)
+        .expect_err("resolved write-capable fleet role must declare a scope")
+        .to_string();
+    assert!(error.contains("must declare"), "{error}");
 }
 
 #[test]
-fn spawn_role_and_write_authority_cannot_contradict() {
+fn read_only_roles_reject_write_authority_but_implementers_can_be_narrowed() {
     let reviewer = parse_spawn_request(&json!({
         "prompt": "review while writing",
         "type": "review",
@@ -1995,9 +2107,12 @@ fn spawn_role_and_write_authority_cannot_contradict() {
         "type": "implementer",
         "write_authority": "read_only"
     }))
-    .expect_err("implementer cannot claim read-only authority")
-    .to_string();
-    assert!(implementer.contains("write-capable role"), "{implementer}");
+    .expect("role identity may be narrowed to read-only authority");
+    assert_eq!(implementer.agent_type, SubAgentType::Implementer);
+    assert_eq!(
+        implementer.write_authority,
+        Some(SpawnWriteAuthority::ReadOnly)
+    );
 }
 
 #[test]
@@ -2318,10 +2433,13 @@ fn explore_subagent_inherits_active_model_by_default() {
 fn non_explore_subagents_keep_default_same_model_strength() {
     // Non-explore roles keep the conservative Same default even with no model.
     for role in ["general", "plan", "review", "implementer"] {
-        let input = json!({
+        let mut input = json!({
             "prompt": "do some work",
             "type": role
         });
+        if matches!(role, "general" | "implementer") {
+            input["write_roots"] = json!(["."]);
+        }
         let parsed = parse_spawn_request(&input).expect("spawn request should parse");
         assert_eq!(
             parsed.model_strength,
@@ -3043,7 +3161,16 @@ fn test_parse_spawn_request_accepts_full_role_vocabulary() {
             "normalize_role_alias should accept role alias {role:?}"
         );
 
-        let input = json!({ "prompt": "do work", "role": role });
+        let mut input = json!({ "prompt": "do work", "role": role });
+        if matches!(
+            &expected_type,
+            SubAgentType::General | SubAgentType::Implementer
+        ) {
+            input["write_roots"] = json!(["."]);
+        } else if expected_type == SubAgentType::Custom {
+            input["write_authority"] = json!("workspace_write");
+            input["write_roots"] = json!(["."]);
+        }
         let mut parsed = parse_spawn_request(&input)
             .unwrap_or_else(|e| panic!("role {role:?} should parse, got {e}"));
         assert_eq!(parsed.agent_type, expected_type, "type for role {role:?}");
@@ -3158,7 +3285,8 @@ fn agent_tool_prompt_schema_keeps_ordinary_starts_message_first() {
     let agent_schema = AgentTool::new(manager, stub_runtime()).input_schema();
     let prompt = schema_property_description(&agent_schema, "prompt");
     assert!(prompt.contains("focused task"));
-    assert!(prompt.contains("only field needed"));
+    assert!(prompt.contains("read-only role needs no write scope"));
+    assert!(prompt.contains("write-capable role must also declare a bounded write scope"));
     for ceremony in [
         "Subagent Brief",
         "QUESTION",
@@ -3800,8 +3928,8 @@ fn role_posture_blocks_writes_and_shell_for_read_only_roles() {
         );
     }
 
-    // Custom is governed by its explicit allowed_tools list, so the posture
-    // check permits it (the allowlist is the authority for that role).
+    // Custom passes the role-only check; its explicit allowlist, bounded write
+    // authority, and parent-intersected runtime profile are enforced together.
     assert!(role_posture_permits(
         &SubAgentType::Custom,
         ApprovalRequirement::Suggest
@@ -6669,6 +6797,52 @@ async fn subagent_registry_blocks_approval_tools_without_parent_auto_approve() {
     );
 }
 
+#[tokio::test]
+async fn prompt_only_general_cannot_mutate_under_parent_auto_approve() {
+    let tmp = tempdir().expect("tempdir");
+    let request = parse_spawn_request(&json!({"prompt": "inspect only"})).unwrap();
+    let mut runtime = stub_runtime();
+    runtime.context = ToolContext::new(tmp.path().to_path_buf());
+    runtime.context.auto_approve = true;
+    apply_spawn_write_authority(&mut runtime, &request);
+    runtime.worker_profile = worker_profile_for_spawn(
+        &runtime,
+        &request.agent_type,
+        &AgentWorkerToolProfile::Inherited,
+        "deepseek-v4-pro",
+        None,
+        false,
+    );
+    let registry = SubAgentToolRegistry::new(
+        runtime,
+        request.agent_type,
+        None,
+        Arc::new(Mutex::new(TodoList::new())),
+        Arc::new(Mutex::new(PlanState::default())),
+    );
+
+    let write_error = registry
+        .execute(
+            "agent_test",
+            "write_file",
+            json!({"path": "forbidden.txt", "content": "no"}),
+        )
+        .await
+        .expect_err("read-only General must not write under auto approval");
+    assert!(write_error.to_string().contains("not permitted"));
+    let shell_error = registry
+        .execute(
+            "agent_test",
+            "exec_shell",
+            json!({"command": "touch shell.txt"}),
+        )
+        .await
+        .expect_err("read-only General must not receive mutating shell");
+    assert!(shell_error.to_string().contains("not permitted"));
+    assert!(!tmp.path().join("forbidden.txt").exists());
+    assert!(!tmp.path().join("shell.txt").exists());
+}
+
 const MCP_ACTION_TOOL: &str = "mcp_github_create_pull_request";
 
 fn subagent_registry_with_mcp_action(auto_approve: bool) -> SubAgentToolRegistry {
@@ -7977,6 +8151,7 @@ fn cross_custom_child_rebinds_config_receipts_and_grandchild_route_atomically() 
         &AgentWorkerToolProfile::Inherited,
         "model-b",
         None,
+        false,
     );
     assert_eq!(worker_profile.provider.as_deref(), Some("custom-b"));
 

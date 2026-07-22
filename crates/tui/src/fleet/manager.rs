@@ -31,7 +31,7 @@ use super::task_spec::{
 };
 use super::worker_runtime;
 use crate::config::Config;
-use crate::tools::subagent::{AgentWorkerSpec, SharedSubAgentManager};
+use crate::tools::subagent::{AgentWorkerSpec, SharedSubAgentManager, SubAgentManager};
 
 const DEFAULT_STALE_AFTER_SECONDS: u64 = 300;
 
@@ -506,7 +506,29 @@ impl FleetManager {
         };
         let mut scheduler = FleetScheduler::open(&self.workspace, policy)?;
         scheduler.set_now(now);
-        let report = scheduler.resume_run(run_id)?;
+        // Keep the lock order coordination -> ledger. A restart generation is
+        // durably prepared by the callback before the scheduler publishes the
+        // replacement lease, and an exact one-generation-ahead preparation is
+        // safe to consume after a process crash.
+        let mut coordination_guard = match &self.sub_agent_manager {
+            Some(manager) => Some(
+                manager
+                    .try_write()
+                    .map_err(|_| anyhow!("Fleet coordination state is busy; retry resume"))?,
+            ),
+            None => None,
+        };
+        let report = scheduler.resume_run_with_restart_callback(
+            run_id,
+            |state, task, task_spec, worker_id| {
+                if let Some(guard) = coordination_guard.as_mut() {
+                    self.prepare_registered_restart_generation(
+                        guard, state, task, task_spec, worker_id,
+                    )?;
+                }
+                Ok(())
+            },
+        )?;
         let status = self.run_status(run_id)?;
         Ok(FleetResumeReport {
             run_id: run_id.clone(),
@@ -827,6 +849,15 @@ impl FleetManager {
             .max_workers
             .unwrap_or_else(|| run.worker_specs.len().max(1))
             .clamp(1, 128);
+        let mut coordination_guard = match &self.sub_agent_manager {
+            Some(manager) => {
+                let Ok(guard) = manager.try_write() else {
+                    bail!("Fleet worker {worker_id} coordination state is busy; retry restart");
+                };
+                Some(guard)
+            }
+            None => None,
+        };
         let now = timestamp();
         let latest_seq = state
             .latest_seq
@@ -841,7 +872,7 @@ impl FleetManager {
             .heartbeats
             .get(worker_id)
             .map(|heartbeat| heartbeat.timestamp.as_str());
-        if !self.ledger.restart_task_if_unchanged(
+        let restarted = self.ledger.restart_task_if_unchanged_with_callback(
             &task.entry.run_id,
             &task.entry.task_id,
             worker_id,
@@ -852,7 +883,23 @@ impl FleetManager {
             &now,
             None,
             task.entry.attempts,
-        )? {
+            || {
+                if let Some(guard) = coordination_guard.as_mut() {
+                    let task_spec = run
+                        .task_specs
+                        .iter()
+                        .find(|spec| spec.id == task.entry.task_id)
+                        .ok_or_else(|| {
+                            anyhow!("fleet task {} does not exist", task.entry.task_id)
+                        })?;
+                    self.prepare_registered_restart_generation(
+                        guard, &state, task, task_spec, worker_id,
+                    )?;
+                }
+                Ok(())
+            },
+        )?;
+        if !restarted {
             bail!("worker {worker_id} task changed before it could be restarted");
         }
         self.ledger
@@ -862,6 +909,89 @@ impl FleetManager {
             max_workers,
             inspection: self.inspect_worker(worker_id)?,
         })
+    }
+
+    /// Prepare or consume the exact durable launch generation for one Fleet
+    /// retry. The persisted one-generation-ahead record is the prepare marker:
+    /// it is not launchable while the ledger remains on the old attempt, but a
+    /// retry after a crash may validate and consume it idempotently.
+    fn prepare_registered_restart_generation(
+        &self,
+        coordination: &mut SubAgentManager,
+        state: &FleetLedgerState,
+        task: &FleetTaskState,
+        task_spec: &FleetTaskSpec,
+        worker_id: &str,
+    ) -> Result<()> {
+        let run = state
+            .runs
+            .get(&task.entry.run_id.0)
+            .ok_or_else(|| anyhow!("fleet run {} does not exist", task.entry.run_id.0))?;
+        let worker_spec = run
+            .worker_specs
+            .iter()
+            .find(|worker| worker.id == worker_id)
+            .cloned()
+            .unwrap_or_else(|| default_local_worker(worker_id));
+        let cwd = resolve_task_cwd(&self.workspace, task_spec)?;
+        validate_task_cwd_for_host(&self.workspace, &worker_spec.host, &cwd)?;
+        let roster = self.agent_roster();
+        let expected_current = bind_fleet_launch_attempt(
+            worker_runtime::apply_exec_hardening(
+                worker_runtime::fleet_task_to_worker_spec_with_profiles(
+                    worker_id,
+                    &task.entry.run_id.0,
+                    task_spec,
+                    &worker_spec,
+                    self.run_model(),
+                    &cwd,
+                    roster.members(),
+                    None,
+                )?,
+                &self.exec_config,
+            ),
+            task.entry.attempts,
+        );
+        let record = coordination
+            .get_worker_record(worker_id)
+            .ok_or_else(|| anyhow!("Fleet worker {worker_id} has no registered launch spec"))?;
+        let current_generation = task.entry.attempts.max(1);
+        let next_generation = current_generation
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("Fleet worker {worker_id} exhausted launch generations"))?;
+        let registered_generation = record
+            .spec
+            .launch_manifest
+            .as_ref()
+            .map(|manifest| manifest.generation)
+            .ok_or_else(|| anyhow!("Fleet worker {worker_id} has no persisted launch manifest"))?;
+
+        match registered_generation {
+            generation if generation == current_generation => {
+                validate_registered_launch_spec(&record.spec, &expected_current)?;
+                coordination
+                    .advance_registered_worker_generation(bind_fleet_launch_attempt(
+                        record.spec,
+                        next_generation,
+                    ))
+                    .map_err(anyhow::Error::msg)?;
+            }
+            generation if generation == next_generation => {
+                let mut normalized = record.spec;
+                normalized
+                    .launch_manifest
+                    .as_mut()
+                    .expect("prepared launch manifest checked above")
+                    .generation = current_generation;
+                validate_registered_launch_spec(&normalized, &expected_current)?;
+            }
+            generation => {
+                bail!(
+                    "Fleet worker {worker_id} persisted launch generation {generation} does not match ledger attempt {current_generation} or its prepared retry {next_generation}"
+                );
+            }
+        }
+        Ok(())
     }
 
     pub fn stop_all(&self) -> Result<usize> {
@@ -2127,7 +2257,16 @@ mod tests {
             description: None,
             objective: Some(format!("Complete {id}")),
             instructions: format!("do {id}"),
-            worker: None,
+            worker: Some(FleetTaskWorkerProfile {
+                agent_profile: None,
+                role: Some("reviewer".to_string()),
+                loadout: None,
+                model_class: None,
+                model: None,
+                tool_profile: Some("read-only".to_string()),
+                tools: Vec::new(),
+                capabilities: Vec::new(),
+            }),
             workspace: None,
             input_files: Vec::new(),
             context: Vec::new(),
@@ -3106,7 +3245,11 @@ while :; do sleep 1; done
     #[test]
     fn standalone_restart_drives_replacement_attempt_to_terminal_receipt() {
         let tmp = TempDir::new().unwrap();
-        let manager = FleetManager::open(tmp.path()).unwrap();
+        let coordination =
+            crate::tools::subagent::new_shared_subagent_manager(tmp.path().to_path_buf(), 2);
+        let manager = FleetManager::open(tmp.path())
+            .unwrap()
+            .with_sub_agent_manager(coordination.clone());
         let path = task_spec_file(&tmp, vec![task("task-a")]);
         let marker = tmp.path().join("replacement-attempt-ran");
         let fake = fake_codewhale(
@@ -3158,6 +3301,208 @@ exit 0
         assert_eq!(state.tasks[&key].status, FleetTaskLedgerStatus::Completed);
         assert_eq!(state.receipts[&key].attempt, Some(2));
         assert!(state.receipts[&key].terminal_seq.is_some());
+        let generation = coordination
+            .try_read()
+            .unwrap()
+            .get_worker_record(worker_id)
+            .and_then(|record| record.spec.launch_manifest)
+            .map(|manifest| manifest.generation);
+        assert_eq!(generation, Some(2));
+    }
+
+    #[test]
+    fn prepared_restart_survives_reload_and_commits_once() {
+        let tmp = TempDir::new().unwrap();
+        let coordination =
+            crate::tools::subagent::new_shared_subagent_manager(tmp.path().to_path_buf(), 2);
+        let manager = FleetManager::open(tmp.path())
+            .unwrap()
+            .with_sub_agent_manager(coordination.clone());
+        let path = task_spec_file(&tmp, vec![task("task-a")]);
+        let report = manager.create_run_from_task_spec_path(&path, 1).unwrap();
+        let worker_id = report.worker_ids[0].clone();
+
+        manager.ledger.fail_next_restart_append_after_callback();
+        let error = manager
+            .restart_worker(&worker_id)
+            .expect_err("restart append failpoint must leave a durable preparation");
+        assert!(
+            error
+                .to_string()
+                .contains("forced Fleet restart ledger append failure"),
+            "{error:#}"
+        );
+        assert_eq!(
+            manager.rebuild_state().unwrap().tasks[&task_key(&report.run_id.0, "task-a")]
+                .entry
+                .attempts,
+            1,
+            "the replacement lease was not published"
+        );
+        let prepared_spec = coordination
+            .try_read()
+            .unwrap()
+            .get_worker_record(&worker_id)
+            .unwrap()
+            .spec;
+        assert_eq!(
+            prepared_spec.launch_manifest.as_ref().unwrap().generation,
+            2,
+            "generation two is the durable prepare marker"
+        );
+
+        drop(manager);
+        drop(coordination);
+
+        let reloaded_coordination =
+            crate::tools::subagent::new_shared_subagent_manager(tmp.path().to_path_buf(), 2);
+        let reloaded = FleetManager::open(tmp.path())
+            .unwrap()
+            .with_sub_agent_manager(reloaded_coordination.clone());
+        reloaded
+            .restart_worker(&worker_id)
+            .expect("reload must idempotently consume the prepared generation");
+
+        let state = reloaded.rebuild_state().unwrap();
+        assert_eq!(
+            state.tasks[&task_key(&report.run_id.0, "task-a")]
+                .entry
+                .attempts,
+            2
+        );
+        let committed_spec = reloaded_coordination
+            .try_read()
+            .unwrap()
+            .get_worker_record(&worker_id)
+            .unwrap()
+            .spec;
+        assert_eq!(committed_spec, prepared_spec, "only generation may change");
+        let ledger_text = std::fs::read_to_string(reloaded.ledger_path()).unwrap();
+        assert_eq!(
+            ledger_text.matches("\"state\":\"restarted\"").count(),
+            1,
+            "the prepared retry commits exactly one restart event"
+        );
+    }
+
+    #[test]
+    fn prepared_restart_with_corrupt_depth_fails_closed_after_reload() {
+        let tmp = TempDir::new().unwrap();
+        let coordination =
+            crate::tools::subagent::new_shared_subagent_manager(tmp.path().to_path_buf(), 2);
+        let manager = FleetManager::open(tmp.path())
+            .unwrap()
+            .with_sub_agent_manager(coordination.clone());
+        let path = task_spec_file(&tmp, vec![task("task-a")]);
+        let report = manager.create_run_from_task_spec_path(&path, 1).unwrap();
+        let worker_id = report.worker_ids[0].clone();
+
+        manager.ledger.fail_next_restart_append_after_callback();
+        manager
+            .restart_worker(&worker_id)
+            .expect_err("failpoint leaves generation two prepared");
+        {
+            let mut guard = coordination.try_write().unwrap();
+            let mut corrupt = guard.get_worker_record(&worker_id).unwrap().spec;
+            corrupt.max_spawn_depth = corrupt.max_spawn_depth.saturating_add(1);
+            guard
+                .replace_registered_worker_spec_for_test(corrupt)
+                .unwrap();
+        }
+        drop(manager);
+        drop(coordination);
+
+        let reloaded_coordination =
+            crate::tools::subagent::new_shared_subagent_manager(tmp.path().to_path_buf(), 2);
+        let reloaded = FleetManager::open(tmp.path())
+            .unwrap()
+            .with_sub_agent_manager(reloaded_coordination);
+        let error = reloaded
+            .restart_worker(&worker_id)
+            .expect_err("prepared authority corruption must fail before ledger commit");
+        assert!(
+            error
+                .to_string()
+                .contains("does not match the exact task lease")
+        );
+        let state = reloaded.rebuild_state().unwrap();
+        assert_eq!(
+            state.tasks[&task_key(&report.run_id.0, "task-a")]
+                .entry
+                .attempts,
+            1
+        );
+        assert!(state.restarted_events.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resume_stale_registered_worker_advances_generation_and_launches() {
+        let tmp = TempDir::new().unwrap();
+        let coordination =
+            crate::tools::subagent::new_shared_subagent_manager(tmp.path().to_path_buf(), 2);
+        let manager = FleetManager::open(tmp.path())
+            .unwrap()
+            .with_stale_after(Duration::from_secs(5))
+            .with_sub_agent_manager(coordination.clone());
+        let path = task_spec_file(&tmp, vec![role_task_with_retry("task-a", "reviewer", 3)]);
+        let report = manager.create_run_from_task_spec_path(&path, 1).unwrap();
+        let worker_id = report.worker_ids[0].clone();
+        let marker = tmp.path().join("resumed-attempt-ran");
+        let fake = fake_codewhale(
+            &tmp,
+            &format!(
+                r#"#!/bin/sh
+touch '{}'
+printf '{{"type":"content","content":"resumed attempt"}}\n'
+exit 0
+"#,
+                marker.display()
+            ),
+        );
+
+        drop(manager);
+        drop(coordination);
+
+        let reloaded_coordination =
+            crate::tools::subagent::new_shared_subagent_manager(tmp.path().to_path_buf(), 2);
+        let reloaded = FleetManager::open(tmp.path())
+            .unwrap()
+            .with_stale_after(Duration::from_secs(5))
+            .with_sub_agent_manager(reloaded_coordination.clone());
+        let resumed = reloaded
+            .resume_run_at(&report.run_id, Utc::now() + chrono::Duration::minutes(10))
+            .unwrap();
+        assert_eq!(resumed.reclaimed_stale, 1);
+        assert_eq!(resumed.restarted, 1);
+        assert_eq!(
+            reloaded.rebuild_state().unwrap().tasks[&task_key(&report.run_id.0, "task-a")]
+                .entry
+                .attempts,
+            2
+        );
+        assert_eq!(
+            reloaded_coordination
+                .try_read()
+                .unwrap()
+                .get_worker_record(&worker_id)
+                .unwrap()
+                .spec
+                .launch_manifest
+                .unwrap()
+                .generation,
+            2
+        );
+
+        let status = complete_with_fake_codewhale(&reloaded, &report.run_id, 1, &fake);
+        assert!(marker.is_file(), "the recovered replacement never launched");
+        assert_eq!(status.completed, 1);
+        assert_eq!(status.restarted, 1);
+        let state = reloaded.rebuild_state().unwrap();
+        assert_eq!(
+            state.receipts[&task_key(&report.run_id.0, "task-a")].attempt,
+            Some(2)
+        );
     }
 
     #[cfg(unix)]
@@ -3632,6 +3977,12 @@ esac
                 tools: tools.into_iter().map(str::to_string).collect(),
                 capabilities: vec!["local-smoke".to_string()],
             });
+            if role == "builder" {
+                task.workspace = Some(FleetWorkspaceRequirements {
+                    writable_paths: vec![PathBuf::from(".codewhale/fleet")],
+                    ..FleetWorkspaceRequirements::default()
+                });
+            }
             task.expected_artifacts = vec![FleetArtifactKind::Log, FleetArtifactKind::Receipt];
             task.scorer = Some(FleetScorerSpec::ExitCode);
             task.retry_policy = Some(FleetRetryPolicy {
@@ -3920,7 +4271,7 @@ esac
         contextual.objective = Some("Review the release ledger".to_string());
         contextual.worker = Some(FleetTaskWorkerProfile {
             agent_profile: None,
-            role: Some("release-reviewer".to_string()),
+            role: Some("reviewer".to_string()),
             loadout: None,
             model_class: None,
             model: None,
@@ -3949,7 +4300,7 @@ esac
             inspection.objective.as_deref(),
             Some("Review the release ledger")
         );
-        assert_eq!(inspection.role.as_deref(), Some("release-reviewer"));
+        assert_eq!(inspection.role.as_deref(), Some("reviewer"));
         assert_eq!(inspection.host.as_deref(), Some("local"));
         assert_eq!(
             inspection.alert_state.as_deref(),
@@ -4093,6 +4444,7 @@ esac
                 "id": "task-a",
                 "name": "task-a",
                 "instructions": "report ok",
+                "worker": {"role": "reviewer", "tool_profile": "read-only"},
                 "expected_artifacts": ["log"]
             }],
             "security_policy": {

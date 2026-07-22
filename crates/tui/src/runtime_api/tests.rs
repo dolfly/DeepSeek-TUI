@@ -1611,13 +1611,13 @@ async fn workspace_and_automation_endpoints_work() -> Result<()> {
 
 #[tokio::test]
 async fn fleet_status_runtime_api_exposes_state_and_actions() -> Result<()> {
-    use crate::tools::subagent::{AgentWorkerSpec, AgentWorkerToolProfile, SubAgentType};
-    use crate::worker_profile::WorkerRuntimeProfile;
-
     let root = std::env::temp_dir().join(format!("codewhale-fleet-api-{}", Uuid::new_v4()));
     let workspace = root.join("workspace");
     fs::create_dir_all(&workspace)?;
-    let manager = FleetManager::open(&workspace)?;
+    let sub_agent_manager = runtime_api_sub_agent_manager(&workspace, 2);
+    let manager = FleetManager::open(&workspace)?
+        .with_sub_agent_manager(sub_agent_manager.clone())
+        .with_session_model(DEFAULT_TEXT_MODEL);
     let task = codewhale_protocol::fleet::FleetTaskSpec {
         id: "task-a".to_string(),
         name: "Task A".to_string(),
@@ -1626,7 +1626,7 @@ async fn fleet_status_runtime_api_exposes_state_and_actions() -> Result<()> {
         instructions: "Stay running for inspection.".to_string(),
         worker: Some(codewhale_protocol::fleet::FleetTaskWorkerProfile {
             agent_profile: None,
-            role: Some("status-reviewer".to_string()),
+            role: Some("reviewer".to_string()),
             loadout: None,
             model_class: None,
             model: None,
@@ -1660,30 +1660,6 @@ async fn fleet_status_runtime_api_exposes_state_and_actions() -> Result<()> {
     let fake_codewhale = write_fake_fleet_binary(&root, &restarted_marker)?;
     let worker_id = report.worker_ids[0].clone();
     let sessions_dir = root.join("sessions");
-    let sub_agent_manager = runtime_api_sub_agent_manager(&workspace, 2);
-    {
-        let mut guard = sub_agent_manager.write().await;
-        guard.register_worker(AgentWorkerSpec {
-            worker_id: worker_id.clone(),
-            run_id: report.run_id.0.clone(),
-            parent_run_id: None,
-            session_name: Some("runtime-api-fleet-worker".to_string()),
-            objective: "Inspect fleet status through Runtime API".to_string(),
-            role: Some("status-reviewer".to_string()),
-            agent_type: SubAgentType::Review,
-            model: "auto".to_string(),
-            workspace: workspace.clone(),
-            git_branch: None,
-            context_mode: "fresh".to_string(),
-            fork_context: false,
-            tool_profile: AgentWorkerToolProfile::Explicit(vec!["rg".to_string()]),
-            runtime_profile: WorkerRuntimeProfile::for_role(SubAgentType::Review),
-            max_steps: 8,
-            spawn_depth: 0,
-            max_spawn_depth: codewhale_config::DEFAULT_SPAWN_DEPTH,
-            launch_manifest: None,
-        });
-    }
     let Some((addr, _runtime_threads, handle)) =
         spawn_test_server_with_root_token_mobile_workspace_and_subagents(
             root.clone(),
@@ -1721,7 +1697,7 @@ async fn fleet_status_runtime_api_exposes_state_and_actions() -> Result<()> {
         worker["objective"],
         "Inspect fleet status through Runtime API"
     );
-    assert_eq!(worker["role"], "status-reviewer");
+    assert_eq!(worker["role"], "reviewer");
     assert_eq!(worker["host"], "local");
     assert_eq!(worker["artifacts"][0]["kind"], "log");
     assert_eq!(worker["runtime_state"]["agent_status"], "starting");

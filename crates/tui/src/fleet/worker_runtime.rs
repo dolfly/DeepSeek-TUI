@@ -2538,7 +2538,16 @@ mod tests {
             description: None,
             objective: None,
             instructions: "Do the task.".to_string(),
-            worker: None,
+            worker: Some(FleetTaskWorkerProfile {
+                agent_profile: None,
+                role: Some("reviewer".to_string()),
+                loadout: None,
+                model_class: None,
+                model: None,
+                tool_profile: Some("read-only".to_string()),
+                tools: Vec::new(),
+                capabilities: Vec::new(),
+            }),
             workspace: None,
             input_files: vec![],
             context: vec![],
@@ -2662,7 +2671,14 @@ mod tests {
                     },
                     capabilities: vec![],
                 }),
-                workspace: None,
+                workspace: matches!(&expected_type, SubAgentType::Implementer).then(|| {
+                    FleetWorkspaceRequirements {
+                        root: Some(PathBuf::from(".")),
+                        required_files: Vec::new(),
+                        writable_paths: vec![PathBuf::from(".")],
+                        environment: None,
+                    }
+                }),
                 input_files: vec![],
                 context: vec![],
                 budget: None,

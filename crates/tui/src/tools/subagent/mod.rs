@@ -1477,8 +1477,16 @@ fn worker_profile_for_spawn(
     tool_profile: &AgentWorkerToolProfile,
     effective_model: &str,
     model_route: Option<ModelRoute>,
+    custom_write_authority: bool,
 ) -> WorkerRuntimeProfile {
     let mut requested = WorkerRuntimeProfile::for_role(agent_type.clone());
+    // Custom starts locked down, but an explicit bounded write authority may
+    // deliberately open only the posture needed by its explicit tool list.
+    // Parent intersection below remains the hard ceiling.
+    if *agent_type == SubAgentType::Custom && custom_write_authority {
+        requested.permissions.write = true;
+        requested.shell = ShellPolicy::Full;
+    }
     requested.tools = worker_tool_scope(tool_profile);
     requested.model = model_route.unwrap_or_else(|| ModelRoute::Fixed(effective_model.to_string()));
     let provider = runtime.client.api_provider();
@@ -3900,6 +3908,83 @@ impl SubAgentManager {
         self.worker_records.get(worker_id).cloned()
     }
 
+    #[cfg(test)]
+    pub(crate) fn replace_registered_worker_spec_for_test(
+        &mut self,
+        spec: AgentWorkerSpec,
+    ) -> Result<(), String> {
+        let worker_id = spec.worker_id.clone();
+        let record = self
+            .worker_records
+            .get_mut(&worker_id)
+            .ok_or_else(|| format!("Fleet worker {worker_id} has no registered launch spec"))?;
+        record.spec = spec;
+        self.persist_state_synchronously()
+            .map_err(|error| format!("failed to persist test worker spec: {error}"))
+    }
+
+    /// Persist the next exact launch generation for a Fleet restart without
+    /// changing the worker's authority, route, prompt, or retained lifecycle
+    /// evidence. The Fleet manager validates the full spec against the task
+    /// lease before calling this; this local check makes generation the only
+    /// field that can change through this narrow seam.
+    pub(crate) fn advance_registered_worker_generation(
+        &mut self,
+        spec: AgentWorkerSpec,
+    ) -> Result<(), String> {
+        self.ensure_coordination_process_lock()?;
+        let worker_id = spec.worker_id.clone();
+        let previous = self
+            .worker_records
+            .get(&worker_id)
+            .cloned()
+            .ok_or_else(|| format!("Fleet worker {worker_id} has no registered launch spec"))?;
+        let old_generation = previous
+            .spec
+            .launch_manifest
+            .as_ref()
+            .map(|manifest| manifest.generation)
+            .ok_or_else(|| format!("Fleet worker {worker_id} has no persisted launch manifest"))?;
+        let new_generation = spec
+            .launch_manifest
+            .as_ref()
+            .map(|manifest| manifest.generation)
+            .ok_or_else(|| {
+                format!("Fleet worker {worker_id} replacement has no launch manifest")
+            })?;
+        if new_generation != old_generation.saturating_add(1) {
+            return Err(format!(
+                "Fleet worker {worker_id} restart generation must advance from {old_generation} to {}",
+                old_generation.saturating_add(1)
+            ));
+        }
+        let mut expected = previous.spec.clone();
+        expected
+            .launch_manifest
+            .as_mut()
+            .expect("old launch manifest checked above")
+            .generation = new_generation;
+        if expected != spec {
+            return Err(format!(
+                "Fleet worker {worker_id} restart may change only its launch generation"
+            ));
+        }
+
+        let record = self
+            .worker_records
+            .get_mut(&worker_id)
+            .expect("worker record checked above");
+        record.spec = spec;
+        record.updated_at_ms = epoch_millis_now();
+        if let Err(error) = self.persist_state_synchronously() {
+            self.worker_records.insert(worker_id, previous);
+            return Err(format!(
+                "failed to persist Fleet restart launch generation: {error}"
+            ));
+        }
+        Ok(())
+    }
+
     /// Reconcile an externally executed Fleet worker with the shared headless
     /// lifecycle projection. This is idempotent and makes old write claims stop
     /// participating in active-overlap checks once the durable Fleet task is
@@ -4770,6 +4855,7 @@ impl SubAgentManager {
             &tool_profile,
             &agent.model,
             options.model_route.clone(),
+            options.write_claim.is_some(),
         );
         runtime.worker_profile = runtime_profile.clone();
         let write_capable = runtime_profile.permissions.write;
@@ -6836,6 +6922,12 @@ async fn spawn_subagent_from_input(
     apply_session_spawn_defaults(&mut runtime);
     let mut spawn_request = parse_spawn_request(&input)?;
     let profile_member = apply_spawn_profile(&mut spawn_request, &runtime.fleet_roster)?;
+    // Profile-backed requests cannot be classified safely until the roster
+    // resolves their effective role. Enforce the same bounded-write contract
+    // after that resolution so read-only profiles stay ergonomic while a
+    // manager/builder profile can never acquire an implicit repository-wide
+    // write claim.
+    validate_spawn_write_contract(&mut spawn_request, false)?;
 
     if runtime.would_exceed_depth() {
         return Err(ToolError::execution_failed(format!(
@@ -6913,13 +7005,8 @@ async fn spawn_subagent_from_input(
             }
         }
     }
-    // Enforce declared write authority (TUI-DOG-017): `read_only` narrows the
-    // child's runtime profile so Suggest-level write tools are actually gated,
-    // not just described. `derive_child` intersects permissions, so the
-    // narrowing also binds every grandchild.
-    if spawn_request.write_authority == Some(SpawnWriteAuthority::ReadOnly) {
-        child_runtime.worker_profile.permissions.write = false;
-    }
+    apply_spawn_write_authority(&mut child_runtime, &spawn_request);
+    let write_capable = spawn_request_is_write_capable(&spawn_request);
     // Resolve the model once against the CHILD's (possibly profile-pinned)
     // provider. The typed selection carries both precedence and provenance so
     // a role default cannot override a saved AgentProfile model (#4177).
@@ -6969,11 +7056,6 @@ async fn spawn_subagent_from_input(
             "{effective_prompt}\n\nDelegation contract (bounded):\nDependencies:\n{dependencies}\nAcceptance:\n{acceptance}"
         )
     };
-    let write_capable = spawn_request.write_authority != Some(SpawnWriteAuthority::ReadOnly)
-        && matches!(
-            spawn_request.agent_type,
-            SubAgentType::General | SubAgentType::Implementer | SubAgentType::Custom
-        );
     let write_claim = write_capable.then(|| WriteScopeClaim {
         owner: String::new(),
         roots: spawn_request.write_roots.clone(),
@@ -7078,6 +7160,39 @@ async fn spawn_subagent_from_input(
     }
 
     Ok((result, spawn_metadata))
+}
+
+fn apply_spawn_write_authority(runtime: &mut SubAgentRuntime, request: &SpawnRequest) {
+    if request.write_authority != Some(SpawnWriteAuthority::ReadOnly) {
+        return;
+    }
+    // `read_only` must be an executable posture, not just metadata. Normally
+    // write-capable identities also inherit Full shell, which could mutate the
+    // workspace without a scope-aware claim under Auto/Full Access. Clamp that
+    // shell surface completely; verifier keeps its deliberate test runner.
+    runtime.worker_profile.permissions.write = false;
+    if matches!(
+        request.agent_type,
+        SubAgentType::General | SubAgentType::Implementer | SubAgentType::Custom
+    ) {
+        runtime.worker_profile.shell = ShellPolicy::None;
+    }
+}
+
+fn spawn_request_is_write_capable(request: &SpawnRequest) -> bool {
+    match request.agent_type {
+        SubAgentType::General | SubAgentType::Implementer => {
+            request.write_authority != Some(SpawnWriteAuthority::ReadOnly)
+        }
+        SubAgentType::Custom => matches!(
+            request.write_authority,
+            Some(SpawnWriteAuthority::WorkspaceWrite | SpawnWriteAuthority::WorktreeWrite)
+        ),
+        SubAgentType::Explore
+        | SubAgentType::Plan
+        | SubAgentType::Review
+        | SubAgentType::Verifier => false,
+    }
 }
 
 /// A root Operate dispatch has already crossed the approval boundary on the
@@ -9440,7 +9555,7 @@ fn parse_spawn_request(input: &Value) -> Result<SpawnRequest, ToolError> {
             )));
         }
     };
-    let mut write_authority = match write_authority_str
+    let write_authority = match write_authority_str
         .map(|auth| auth.trim().to_ascii_lowercase())
         .as_deref()
     {
@@ -9460,54 +9575,16 @@ fn parse_spawn_request(input: &Value) -> Result<SpawnRequest, ToolError> {
              (workspace_policy 'worktree' or worktree=true).",
         ));
     }
-    if matches!(
-        agent_type,
-        SubAgentType::Explore | SubAgentType::Plan | SubAgentType::Review | SubAgentType::Verifier
-    ) && write_authority.is_some_and(|authority| authority != SpawnWriteAuthority::ReadOnly)
-    {
-        return Err(ToolError::invalid_input(format!(
-            "{} is a read-only role and cannot declare write-capable authority",
-            agent_type.as_str()
-        )));
-    }
-    if agent_type == SubAgentType::Implementer
-        && write_authority == Some(SpawnWriteAuthority::ReadOnly)
-    {
-        return Err(ToolError::invalid_input(
-            "implementer is a write-capable role and cannot declare read_only authority; use review, verifier, plan, explore, or general for a read-only child",
-        ));
-    }
     let write_roots = parse_coordination_paths(input, "write_roots")?;
     let exact_files = parse_coordination_paths(input, "exact_files")?;
     let coordination_contracts = parse_bounded_strings(input, "coordination_contracts", 16)?;
-    let write_capable = write_authority != Some(SpawnWriteAuthority::ReadOnly)
-        && matches!(
-            agent_type,
-            SubAgentType::General | SubAgentType::Implementer | SubAgentType::Custom
-        );
-    if write_capable
-        && write_roots.is_empty()
-        && exact_files.is_empty()
-        && coordination_contracts.is_empty()
-    {
-        let prompt_only_general = agent_type == SubAgentType::General
-            && !agent_type_explicit
-            && profile.is_none()
-            && role_input.is_none()
-            && type_input.is_none();
-        if write_authority.is_some() || !prompt_only_general {
-            return Err(ToolError::invalid_input(
-                "explicit write-capable agent starts must declare write_roots, exact_files, or coordination_contracts; choose a read-only role for non-mutating work"
-                    .to_string(),
-            ));
-        }
-        // A prompt-only/general launch remains ergonomic but is not silently
-        // granted the whole repository. It starts read-only until the caller
-        // supplies an explicit bounded mutation claim.
-        write_authority = Some(SpawnWriteAuthority::ReadOnly);
-    }
-
-    Ok(SpawnRequest {
+    let prompt_only_general = agent_type == SubAgentType::General
+        && !agent_type_explicit
+        && profile.is_none()
+        && role_input.is_none()
+        && type_input.is_none();
+    let unresolved_profile = profile.is_some();
+    let mut request = SpawnRequest {
         session_name,
         prompt: prompt.clone(),
         dependencies,
@@ -9536,7 +9613,69 @@ fn parse_spawn_request(input: &Value) -> Result<SpawnRequest, ToolError> {
         write_roots,
         exact_files,
         coordination_contracts,
-    })
+    };
+    // A roster profile may resolve the parse-time General placeholder to a
+    // read-only scout/reviewer or to a write-capable manager/builder. Defer
+    // classification until apply_spawn_profile has the live roster; all
+    // profile-less requests can be validated immediately.
+    if !unresolved_profile {
+        validate_spawn_write_contract(&mut request, prompt_only_general)?;
+    }
+    Ok(request)
+}
+
+fn validate_spawn_write_contract(
+    request: &mut SpawnRequest,
+    allow_prompt_only_general: bool,
+) -> Result<(), ToolError> {
+    if matches!(
+        request.agent_type,
+        SubAgentType::Explore | SubAgentType::Plan | SubAgentType::Review | SubAgentType::Verifier
+    ) && request
+        .write_authority
+        .is_some_and(|authority| authority != SpawnWriteAuthority::ReadOnly)
+    {
+        return Err(ToolError::invalid_input(format!(
+            "{} is a read-only role and cannot declare write-capable authority",
+            request.agent_type.as_str()
+        )));
+    }
+    let declares_scope = !request.write_roots.is_empty()
+        || !request.exact_files.is_empty()
+        || !request.coordination_contracts.is_empty();
+    if request.write_authority == Some(SpawnWriteAuthority::ReadOnly) && declares_scope {
+        return Err(ToolError::invalid_input(
+            "read_only authority cannot declare write_roots, exact_files, or coordination_contracts"
+                .to_string(),
+        ));
+    }
+    if request.agent_type == SubAgentType::Custom && request.write_authority.is_none() {
+        if declares_scope {
+            return Err(ToolError::invalid_input(
+                "custom write scopes require explicit workspace_write or worktree_write authority"
+                    .to_string(),
+            ));
+        }
+        request.write_authority = Some(SpawnWriteAuthority::ReadOnly);
+    }
+    let write_capable = spawn_request_is_write_capable(request);
+    if write_capable
+        && request.write_roots.is_empty()
+        && request.exact_files.is_empty()
+        && request.coordination_contracts.is_empty()
+    {
+        if request.write_authority.is_some() || !allow_prompt_only_general {
+            return Err(ToolError::invalid_input(
+                "explicit write-capable agent starts must declare write_roots, exact_files, or coordination_contracts; choose a read-only role for non-mutating work"
+                    .to_string(),
+            ));
+        }
+        // A prompt-only/general launch remains ergonomic but is not silently
+        // granted the whole repository. It starts read-only until the caller
+        // supplies an explicit bounded mutation claim.
+        request.write_authority = Some(SpawnWriteAuthority::ReadOnly);
+    }
+    Ok(())
 }
 
 fn parse_bounded_strings(input: &Value, key: &str, limit: usize) -> Result<Vec<String>, ToolError> {
@@ -10871,8 +11010,9 @@ fn routine_agent_progress_can_preserve_event_headroom(status: AgentWorkerStatus)
 ///   (read-only shell) and `plan` (no shell) are denied because read-only-shell
 ///   enforcement is not yet wired at the exec layer.
 ///
-/// `custom` is governed by its explicit `allowed_tools` list, so the posture
-/// check permits it here (the allowlist is the authority for that role).
+/// `custom` passes this role-only check. Its explicit allowlist, bounded write
+/// authority, and parent-intersected runtime profile jointly form the actual
+/// authority envelope.
 fn role_posture_permits(agent_type: &SubAgentType, approval: ApprovalRequirement) -> bool {
     if matches!(agent_type, SubAgentType::Custom) {
         return true;
