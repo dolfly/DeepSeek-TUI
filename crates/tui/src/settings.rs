@@ -355,6 +355,11 @@ pub struct Settings {
     /// Per-provider model overrides. Key is provider name (e.g. "openai"),
     /// value is the model id. Takes precedence over `default_model`.
     pub provider_models: Option<std::collections::HashMap<String, String>>,
+    /// Provider-scoped model IDs intentionally enabled for the ordinary model
+    /// picker. Missing on older files; current and saved provider choices are
+    /// seeded at load time so the migration is additive and non-breaking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_models: Option<std::collections::HashMap<String, Vec<String>>>,
     /// Header status indicator next to the effort chip. Cycles through a
     /// per-turn animation keyed off `App::turn_started_at`:
     /// - `"cw"` (default): static typographic Codewhale mark.
@@ -475,6 +480,7 @@ impl Default for Settings {
             reasoning_effort: None,
             permission_posture: None,
             provider_models: None,
+            enabled_models: None,
             status_indicator: "cw".to_string(),
             synchronized_output: "auto".to_string(),
             prefer_external_pdftotext: false,
@@ -1400,6 +1406,29 @@ impl Settings {
         self.provider_models
             .get_or_insert_with(std::collections::HashMap::new)
             .insert(provider.to_string(), model.to_string());
+        self.enable_model_for_provider(provider, model);
+    }
+
+    /// Add a model to a provider's enabled chooser set without removing prior
+    /// choices. IDs are compared case-insensitively but preserve their wire
+    /// spelling on disk.
+    pub fn enable_model_for_provider(&mut self, provider: &str, model: &str) {
+        let provider = provider.trim();
+        let model = model.trim();
+        if provider.is_empty() || model.is_empty() || model.eq_ignore_ascii_case("auto") {
+            return;
+        }
+        let models = self
+            .enabled_models
+            .get_or_insert_with(std::collections::HashMap::new)
+            .entry(provider.to_string())
+            .or_default();
+        if !models
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(model))
+        {
+            models.push(model.to_string());
+        }
     }
 
     /// Persist a provider's model selection.
@@ -2363,6 +2392,38 @@ mod tests {
         assert!(display.contains("    zai: GLM-5.2"));
         assert!(display.contains("    deepseek: deepseek-v4-flash"));
         assert!(!display.contains("  default_model:"));
+    }
+
+    #[test]
+    fn provider_model_selection_additively_enables_models() {
+        let mut settings = Settings::default();
+
+        settings.set_model_for_provider("openrouter", "anthropic/claude-sonnet-4");
+        settings.enable_model_for_provider("openrouter", "qwen/qwen3.7-plus");
+        settings.enable_model_for_provider("openrouter", "QWEN/QWEN3.7-PLUS");
+        settings.enable_model_for_provider("openrouter", "auto");
+
+        assert_eq!(
+            settings
+                .provider_models
+                .as_ref()
+                .and_then(|models| models.get("openrouter")),
+            Some(&"anthropic/claude-sonnet-4".to_string())
+        );
+        assert_eq!(
+            settings
+                .enabled_models
+                .as_ref()
+                .and_then(|models| models.get("openrouter")),
+            Some(&vec![
+                "anthropic/claude-sonnet-4".to_string(),
+                "qwen/qwen3.7-plus".to_string(),
+            ])
+        );
+
+        let encoded = toml::to_string(&settings).expect("serialize enabled models");
+        let decoded: Settings = toml::from_str(&encoded).expect("deserialize enabled models");
+        assert_eq!(decoded.enabled_models, settings.enabled_models);
     }
 
     /// Tests that mutate process-global `NO_ANIMATIONS` serialise

@@ -204,10 +204,9 @@ pub fn model(app: &mut App, model_name: Option<&str>) -> CommandResult {
                 app.session.last_completion_tokens = None;
                 app.session.last_output_throughput = None;
             }
-            app.provider_models.insert(
-                app.provider_identity_for_persistence().to_string(),
-                "auto".to_string(),
-            );
+            let provider_identity = app.provider_identity_for_persistence().to_string();
+            app.provider_models
+                .insert(provider_identity, "auto".to_string());
             let persist_warning = provider_model_selection_persist_warning(app, "auto");
             let mut message = tr(app.ui_locale, MessageId::ModelChanged)
                 .replace("{old}", &old_model)
@@ -295,10 +294,10 @@ pub fn model(app: &mut App, model_name: Option<&str>) -> CommandResult {
             app.session.last_completion_tokens = None;
             app.session.last_output_throughput = None;
         }
-        app.provider_models.insert(
-            app.provider_identity_for_persistence().to_string(),
-            model_id.clone(),
-        );
+        let provider_identity = app.provider_identity_for_persistence().to_string();
+        app.provider_models
+            .insert(provider_identity.clone(), model_id.clone());
+        app.enable_provider_model(&provider_identity, &model_id);
         let persist_warning = provider_model_selection_persist_warning(app, &model_id);
         let mut message = tr(app.ui_locale, MessageId::ModelChanged)
             .replace("{old}", &old_model)

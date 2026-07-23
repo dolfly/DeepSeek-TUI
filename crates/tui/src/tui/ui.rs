@@ -9602,10 +9602,10 @@ async fn apply_model_picker_choice(
 
     if model_changed {
         app.set_model_selection(resolved_model.clone());
-        app.provider_models.insert(
-            app.provider_identity_for_persistence().to_string(),
-            resolved_model.clone(),
-        );
+        let provider_identity = app.provider_identity_for_persistence().to_string();
+        app.provider_models
+            .insert(provider_identity.clone(), resolved_model.clone());
+        app.enable_provider_model(&provider_identity, &resolved_model);
         app.clear_model_scoped_telemetry();
     }
     if effort_changed {
@@ -9629,8 +9629,8 @@ async fn apply_model_picker_choice(
             ) {
                 settings.set("default_model", &resolved_model)?;
             }
-            settings
-                .set_model_for_provider(app.provider_identity_for_persistence(), &resolved_model);
+            let provider_identity = app.provider_identity_for_persistence();
+            settings.set_model_for_provider(provider_identity, &resolved_model);
         }
         if effort_changed {
             settings.set(
@@ -9864,6 +9864,7 @@ async fn switch_provider(
     if model_override.is_some() {
         app.provider_models
             .insert(target_identity.clone(), new_model.clone());
+        app.enable_provider_model(&target_identity, &new_model);
     }
     app.update_model_compaction_budget();
     if cache_scope_changed {

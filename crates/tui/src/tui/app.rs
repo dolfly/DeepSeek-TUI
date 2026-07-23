@@ -2052,6 +2052,10 @@ pub struct App {
     /// Persisted model selections by provider name. Loaded from settings so
     /// `/model` and the picker can surface saved provider-specific choices.
     pub provider_models: HashMap<String, String>,
+    /// Additive provider-scoped model IDs enabled for the ordinary picker.
+    /// The catalog remains separately discoverable and selecting from it adds
+    /// to this set rather than replacing earlier enabled choices.
+    pub enabled_provider_models: HashMap<String, Vec<String>>,
     /// When true, the model is auto-selected based on request complexity
     /// rather than using a fixed model. The `/model auto` command sets this.
     /// `dispatch_user_message` calls `auto_model_heuristic` to resolve the
@@ -2871,7 +2875,41 @@ fn default_composer_arrows_scroll_for_platform(use_mouse_capture: bool, _is_wind
     !use_mouse_capture
 }
 
+fn push_enabled_provider_model(
+    enabled: &mut HashMap<String, Vec<String>>,
+    provider: &str,
+    model: &str,
+) {
+    let provider = provider.trim();
+    let model = model.trim();
+    if provider.is_empty() || model.is_empty() || model.eq_ignore_ascii_case("auto") {
+        return;
+    }
+    let models = enabled.entry(provider.to_string()).or_default();
+    if !models
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(model))
+    {
+        models.push(model.to_string());
+    }
+}
+
 impl App {
+    pub fn enable_provider_model(&mut self, provider: &str, model: &str) {
+        push_enabled_provider_model(&mut self.enabled_provider_models, provider, model);
+    }
+
+    #[must_use]
+    pub fn provider_model_is_enabled(&self, provider: &str, model: &str) -> bool {
+        self.enabled_provider_models
+            .get(provider)
+            .is_some_and(|models| {
+                models
+                    .iter()
+                    .any(|enabled| enabled.eq_ignore_ascii_case(model))
+            })
+    }
+
     /// Advance and return the model-draft generation. Call when a draft is
     /// requested or a setup/fleet wizard opens; a spawned draft that captured
     /// an older generation is dropped on delivery.
@@ -3170,6 +3208,11 @@ impl App {
             })
             .unwrap_or(model);
         let auto_model = model.trim().eq_ignore_ascii_case("auto");
+        let mut enabled_provider_models = settings.enabled_models.clone().unwrap_or_default();
+        for (saved_provider, saved_model) in &provider_models {
+            push_enabled_provider_model(&mut enabled_provider_models, saved_provider, saved_model);
+        }
+        push_enabled_provider_model(&mut enabled_provider_models, &provider_identity, &model);
         let active_context_window_override = config.context_window_for_provider_config(provider);
         let configured_route_base_url = effective_auth_config.deepseek_base_url();
         let (active_route_limits, active_route_base_url, active_context_window_source) =
@@ -3467,6 +3510,7 @@ impl App {
             last_status_message_seen: None,
             model,
             provider_models,
+            enabled_provider_models,
             auto_model,
             last_effective_model: None,
             last_effective_provider: None,
