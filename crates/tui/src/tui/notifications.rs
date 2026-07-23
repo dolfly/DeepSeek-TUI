@@ -18,8 +18,8 @@ use windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicU8;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -272,6 +272,29 @@ pub fn clear_taskbar_progress() {
 /// Shared flag controlling the title activity marker. Set to `true` by
 /// `start_title_animation()`, cleared by `stop_title_animation()`.
 static TITLE_ANIMATION_RUNNING: AtomicBool = AtomicBool::new(false);
+/// Focus reporting starts enabled before the event loop begins, so treating
+/// the terminal as focused is the safe default: never blink window chrome
+/// unless the terminal has explicitly reported `FocusLost`.
+static TERMINAL_FOCUSED: AtomicBool = AtomicBool::new(true);
+/// Invalidates a previous animation worker when a new turn starts or ends.
+static TITLE_ANIMATION_GENERATION: AtomicU64 = AtomicU64::new(0);
+static TITLE_ANIMATION_BASE: OnceLock<Mutex<String>> = OnceLock::new();
+const TITLE_FRAME_HOLD: Duration = Duration::from_millis(264);
+const TITLE_BRAILLE_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+fn title_animation_base() -> &'static Mutex<String> {
+    TITLE_ANIMATION_BASE.get_or_init(|| Mutex::new("Codewhale".to_string()))
+}
+
+#[must_use]
+fn title_activity_label(base: &str, elapsed: Duration, focused: bool) -> String {
+    if focused {
+        return format!("› {base}");
+    }
+    let frame = TITLE_BRAILLE_FRAMES[(elapsed.as_millis() / TITLE_FRAME_HOLD.as_millis()) as usize
+        % TITLE_BRAILLE_FRAMES.len()];
+    format!("{frame} {base}")
+}
 
 /// Write OSC 0 (set window title) sequence.
 fn set_terminal_title(title: &str) {
@@ -285,11 +308,53 @@ fn set_terminal_title(title: &str) {
 /// `reset_title_on_interaction()` can skip redundant writes.
 static COMPLETION_MARKER_SHOWN: AtomicBool = AtomicBool::new(false);
 
-/// Mark the terminal title as active. Window chrome stays static so an
-/// alt-tabbed session communicates state without another competing spinner.
+/// Mark the terminal title as active. The title stays static while the
+/// terminal is focused; after `FocusLost`, a one-column Braille frame advances
+/// on a deliberately slow divisor so debounced terminals are not flooded with
+/// OSC 0 writes.
 pub fn start_title_animation(original: &str) {
+    if let Ok(mut base) = title_animation_base().lock() {
+        original.clone_into(&mut base);
+    }
+    COMPLETION_MARKER_SHOWN.store(false, Ordering::SeqCst);
     TITLE_ANIMATION_RUNNING.store(true, Ordering::SeqCst);
-    set_terminal_title(&format!("› {original}"));
+    let generation = TITLE_ANIMATION_GENERATION
+        .fetch_add(1, Ordering::SeqCst)
+        .saturating_add(1);
+    let focused = TERMINAL_FOCUSED.load(Ordering::SeqCst);
+    set_terminal_title(&title_activity_label(original, Duration::ZERO, focused));
+
+    let base = original.to_string();
+    std::thread::spawn(move || {
+        let started_at = std::time::Instant::now();
+        loop {
+            std::thread::sleep(TITLE_FRAME_HOLD);
+            if !TITLE_ANIMATION_RUNNING.load(Ordering::SeqCst)
+                || TITLE_ANIMATION_GENERATION.load(Ordering::SeqCst) != generation
+            {
+                break;
+            }
+            if !TERMINAL_FOCUSED.load(Ordering::SeqCst) {
+                set_terminal_title(&title_activity_label(&base, started_at.elapsed(), false));
+            }
+        }
+    });
+}
+
+/// Update the focus gate used by the title activity signal.
+///
+/// Focus gain immediately restores the steady active marker. Focus loss emits
+/// the first animation frame immediately, then the worker advances it at the
+/// debounced cadence.
+pub fn set_terminal_focused(focused: bool) {
+    TERMINAL_FOCUSED.store(focused, Ordering::SeqCst);
+    if !TITLE_ANIMATION_RUNNING.load(Ordering::SeqCst) {
+        return;
+    }
+    let base = title_animation_base()
+        .lock()
+        .map_or_else(|_| "Codewhale".to_string(), |base| base.clone());
+    set_terminal_title(&title_activity_label(&base, Duration::ZERO, focused));
 }
 
 /// Stop the title animation and show a completion marker.
@@ -299,6 +364,7 @@ pub fn start_title_animation(original: &str) {
 /// by [`start_title_animation`].
 pub fn stop_title_animation() {
     TITLE_ANIMATION_RUNNING.store(false, Ordering::SeqCst);
+    TITLE_ANIMATION_GENERATION.fetch_add(1, Ordering::SeqCst);
     COMPLETION_MARKER_SHOWN.store(false, Ordering::SeqCst);
     // Show a completion marker only for beep mode. Bell mode already has its own
     // terminal-level visual indicator (flash/icon).
@@ -315,6 +381,7 @@ pub fn stop_title_animation() {
 /// without presenting them as completed work.
 pub fn stop_title_animation_quietly() {
     TITLE_ANIMATION_RUNNING.store(false, Ordering::SeqCst);
+    TITLE_ANIMATION_GENERATION.fetch_add(1, Ordering::SeqCst);
     COMPLETION_MARKER_SHOWN.store(false, Ordering::SeqCst);
     set_terminal_title("Codewhale");
 }
@@ -744,6 +811,37 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
 
     use super::*;
+
+    #[test]
+    fn title_spinner_is_focus_gated_and_uses_a_slow_divisor() {
+        assert_eq!(
+            title_activity_label("Codewhale", Duration::ZERO, true),
+            "› Codewhale"
+        );
+        assert_eq!(
+            title_activity_label("Codewhale", Duration::ZERO, false),
+            "⠋ Codewhale"
+        );
+        assert_eq!(
+            title_activity_label("Codewhale", Duration::from_millis(263), false),
+            "⠋ Codewhale"
+        );
+        assert_eq!(
+            title_activity_label("Codewhale", Duration::from_millis(264), false),
+            "⠙ Codewhale"
+        );
+    }
+
+    #[test]
+    fn title_spinner_frames_are_single_column_with_ascii_fallbacks() {
+        use unicode_width::UnicodeWidthStr;
+
+        for frame in TITLE_BRAILLE_FRAMES {
+            assert_eq!(frame.width(), 1, "title frame {frame:?} must not shift");
+            let ch = frame.chars().next().expect("one Braille glyph");
+            assert!(crate::tui::glyphs::braille_ascii_fallback(ch).is_some());
+        }
+    }
 
     /// Serialise tests that mutate process-global environment or notification
     /// sound state while the test harness runs them in parallel threads.

@@ -34,6 +34,11 @@ const STATUS_INDICATOR_WHALE_FRAMES: &[&str] = &[
 /// Geometric replacement frames shipped between v0.8.x and v0.8.29.
 const STATUS_INDICATOR_DOT_FRAMES: &[&str] = &["◍", "◉", "◌", "◌", "◉", "◍"];
 
+/// The widest historical whale frame is an emoji (two terminal cells) plus
+/// three dots. Header layout reserves this width for every whale frame so the
+/// provider/model label never shifts while the animation advances.
+const STATUS_INDICATOR_WHALE_WIDTH: usize = 5;
+
 /// Resolve the current status-indicator frame to render in the header
 /// chip cluster.
 ///
@@ -60,8 +65,10 @@ pub fn header_status_indicator_frame(
         "off" | "none" | "hidden" | "false" => return None,
         "dots" | "dot" => STATUS_INDICATOR_DOT_FRAMES,
         "whale" | "🐳" | "🐋" => STATUS_INDICATOR_WHALE_FRAMES,
-        // Unknown values keep the owned typographic mark visible.
-        _ => return Some("cw"),
+        // The parser normally rejects unknown values. If one reaches the
+        // renderer (for example from an older hand-edited config), retain the
+        // product default instead of silently demoting it to the text mark.
+        _ => STATUS_INDICATOR_WHALE_FRAMES,
     };
     let elapsed_ms = turn_started_at
         .map(|t| t.elapsed().as_millis())
@@ -122,7 +129,7 @@ impl<'a> HeaderData<'a> {
             last_prompt_tokens: None,
             reasoning_effort_label: None,
             provider_label: None,
-            status_indicator_frame: Some("cw"),
+            status_indicator_frame: Some(STATUS_INDICATOR_WHALE_FRAMES[0]),
         }
     }
 
@@ -292,8 +299,13 @@ impl<'a> HeaderWidget<'a> {
         } else {
             palette::WHALE_INFO
         };
+        let mut display = frame.to_string();
+        if matches!(frame.chars().next(), Some('🐳' | '🐋')) {
+            display
+                .push_str(&" ".repeat(STATUS_INDICATOR_WHALE_WIDTH.saturating_sub(frame.width())));
+        }
         vec![Span::styled(
-            frame.to_string(),
+            display,
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         )]
     }
@@ -869,9 +881,39 @@ mod tests {
     }
 
     #[test]
-    fn unknown_indicator_mode_defaults_to_cw_mark() {
+    fn unknown_indicator_mode_defaults_to_whale() {
         let frame = super::header_status_indicator_frame(None, "wahel-typo");
-        assert_eq!(frame, Some("cw"));
+        assert_eq!(frame, Some("🐳"));
+    }
+
+    #[test]
+    fn whale_frames_reserve_one_stable_header_width() {
+        use unicode_width::UnicodeWidthStr;
+
+        for frame in super::STATUS_INDICATOR_WHALE_FRAMES {
+            let spans = HeaderWidget::new(
+                HeaderData::new(
+                    AppMode::Agent,
+                    "model",
+                    "workspace",
+                    true,
+                    palette::WHALE_BG,
+                )
+                .with_status_indicator(Some(frame)),
+            )
+            .status_indicator_spans();
+            assert_eq!(
+                spans[0].content.as_ref().width(),
+                super::STATUS_INDICATOR_WHALE_WIDTH,
+                "frame {frame:?} shifted the header"
+            );
+        }
+    }
+
+    #[test]
+    fn whale_glyphs_have_narrow_ascii_fallbacks() {
+        assert_eq!(crate::tui::glyphs::ascii_fallback("🐳"), Some("w"));
+        assert_eq!(crate::tui::glyphs::ascii_fallback("🐋"), Some("w"));
     }
 
     #[test]

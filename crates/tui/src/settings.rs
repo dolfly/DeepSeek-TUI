@@ -481,7 +481,10 @@ impl Default for Settings {
             permission_posture: None,
             provider_models: None,
             enabled_models: None,
-            status_indicator: "cw".to_string(),
+            // The animated whale is the product mark while work is live. It
+            // remains on its first frame at rest, so the default has no idle
+            // redraw cost.
+            status_indicator: "whale".to_string(),
             synchronized_output: "auto".to_string(),
             prefer_external_pdftotext: false,
             workspace_follow_symlinks: false,

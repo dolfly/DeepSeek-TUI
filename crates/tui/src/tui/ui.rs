@@ -4517,6 +4517,16 @@ async fn run_event_loop(
         if let Some(evt) = maybe_terminal_event {
             app.needs_redraw = true;
 
+            match &evt {
+                Event::FocusGained => {
+                    crate::tui::notifications::set_terminal_focused(true);
+                }
+                Event::FocusLost => {
+                    crate::tui::notifications::set_terminal_focused(false);
+                }
+                _ => {}
+            }
+
             // Handle bracketed paste events
             if let Event::Paste(text) = &evt {
                 tracing::debug!(
