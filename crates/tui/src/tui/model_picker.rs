@@ -2473,18 +2473,20 @@ mod tests {
             let row = view.visible_model_rows()[view.selected_model_idx];
             assert!(row.hint.contains(expected_readiness), "{}", row.hint);
             assert!(!row.selectable, "{}", row.hint);
+            // v0.9.1: Enter explains the lock instead of silently no-op'ing.
             assert!(matches!(
                 view.handle_key(KeyEvent::new(
                     KeyCode::Enter,
                     crossterm::event::KeyModifiers::NONE,
                 )),
-                ViewAction::None
+                ViewAction::Emit(ViewEvent::ModelPickerNeedsAuth { .. })
+                    | ViewAction::Emit(ViewEvent::StatusMessage { .. })
             ));
         }
     }
 
     #[test]
-    fn invalid_candidate_is_visible_but_enter_is_inert() {
+    fn invalid_candidate_is_visible_but_enter_explains() {
         let (mut app, mut config, _lock) = create_test_app();
         config.api_key = Some("deepseek-test-key".to_string());
         config.providers = Some(crate::config::ProvidersConfig {
@@ -2513,12 +2515,15 @@ mod tests {
             })
             .expect("invalid configured model remains visible as an inert provider row");
         assert!(!view.selected_model_is_selectable());
+        // Locked/invalid rows explain on Enter rather than applying or
+        // silently ignoring the keystroke.
         assert!(matches!(
             view.handle_key(KeyEvent::new(
                 KeyCode::Enter,
                 crossterm::event::KeyModifiers::NONE,
             )),
-            ViewAction::None
+            ViewAction::Emit(ViewEvent::ModelPickerNeedsAuth { .. })
+                | ViewAction::Emit(ViewEvent::StatusMessage { .. })
         ));
     }
 
@@ -4003,7 +4008,10 @@ mod tests {
 
     #[test]
     fn model_picker_selected_row_renders_readable_selection_contrast() {
-        let (mut app, config, _lock) = create_test_app();
+        let (mut app, mut config, _lock) = create_test_app();
+        // Selectable rows need credentials so the selection aura is the
+        // bright contrast treatment rather than the locked muted style.
+        config.api_key = Some("deepseek-picker-test-key".to_string());
         app.model = "deepseek-v4-flash".to_string();
         app.auto_model = false;
         let view = ModelPickerView::new(&app, &config);
