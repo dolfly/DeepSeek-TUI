@@ -451,6 +451,34 @@ impl ModelPickerView {
         })
     }
 
+    /// Feedback when Enter/apply is pressed on a locked (unauthenticated) model.
+    /// Surfaces the readiness reason instead of a silent no-op, and routes the
+    /// user toward provider authentication/setup when possible.
+    fn explain_unselectable_selection(&self) -> ViewAction {
+        let rows = self.visible_model_rows();
+        let Some(row) = rows.get(self.selected_model_idx) else {
+            return ViewAction::None;
+        };
+        let reason = if row.hint.trim().is_empty() {
+            "This model is not available with the current provider credentials.".to_string()
+        } else {
+            row.hint.clone()
+        };
+        let message = format!(
+            "🔒 {} is locked — {reason}. Open /provider to authenticate, then refresh.",
+            row.id
+        );
+        // Prefer opening provider setup so the user can remediate in one step.
+        if let Some(provider) = row.provider {
+            return ViewAction::Emit(ViewEvent::ModelPickerNeedsAuth {
+                provider,
+                model: row.id.clone(),
+                reason: message,
+            });
+        }
+        ViewAction::Emit(ViewEvent::StatusMessage { message })
+    }
+
     fn resolved_provider(&self) -> Option<ApiProvider> {
         let rows = self.visible_model_rows();
         if self.selected_model_idx < rows.len() {
@@ -714,16 +742,36 @@ impl ModelPickerView {
                 idx,
             ));
             let is_selected = idx == state.selected;
-            let marker = crate::tui::glyphs::selection_marker(is_selected);
-            let label_style = if is_selected {
+            // Non-selectable rows are dimmed with a lock glyph so they never
+            // look choosable. Selection still highlights, but stays muted.
+            let locked = state.pane == Pane::Model
+                && self
+                    .visible_model_rows()
+                    .get(idx)
+                    .is_some_and(|row| !row.selectable);
+            let marker = if locked {
+                "🔒"
+            } else {
+                crate::tui::glyphs::selection_marker(is_selected)
+            };
+            let label_style = if is_selected && !locked {
                 Style::default()
                     .fg(palette::SELECTION_TEXT)
                     .bg(palette::SELECTION_BG)
                     .add_modifier(Modifier::BOLD)
+            } else if is_selected && locked {
+                Style::default()
+                    .fg(palette::TEXT_MUTED)
+                    .bg(palette::SURFACE_ELEVATED)
+                    .add_modifier(Modifier::DIM)
+            } else if locked {
+                Style::default()
+                    .fg(palette::TEXT_MUTED)
+                    .add_modifier(Modifier::DIM)
             } else {
                 Style::default().fg(palette::TEXT_PRIMARY)
             };
-            let hint_style = if is_selected {
+            let hint_style = if is_selected && !locked {
                 Style::default()
                     .fg(palette::SELECTION_TEXT)
                     .bg(palette::SELECTION_BG)
@@ -1612,7 +1660,11 @@ impl ModalView for ModelPickerView {
                 },
             }),
             KeyCode::Enter if self.model_row_count() == 0 => ViewAction::None,
-            KeyCode::Enter if !self.selected_model_is_selectable() => ViewAction::None,
+            KeyCode::Enter if !self.selected_model_is_selectable() => {
+                // Never silently ignore Enter on locked models — surface the
+                // readiness reason and offer provider setup.
+                self.explain_unselectable_selection()
+            }
             KeyCode::Enter => ViewAction::EmitAndClose(self.build_event()),
             // Cycle catalog views (#4115). Handled before the query-typing arm
             // so `a`/`A` always advances the view instead of filtering.
@@ -1738,6 +1790,8 @@ impl ModalView for ModelPickerView {
                 self.last_mouse_selected = Some((pane, idx));
                 if apply && self.selected_model_is_selectable() {
                     ViewAction::EmitAndClose(self.build_event())
+                } else if apply {
+                    self.explain_unselectable_selection()
                 } else {
                     ViewAction::None
                 }

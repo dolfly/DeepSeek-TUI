@@ -713,6 +713,17 @@ pub enum ViewEvent {
         view: String,
         selected_row_id: Option<String>,
     },
+    /// Enter on a locked (unauthenticated) model: explain why selection is
+    /// blocked and open the provider auth/setup path when possible.
+    ModelPickerNeedsAuth {
+        provider: crate::config::ApiProvider,
+        model: String,
+        reason: String,
+    },
+    /// Transient status toast from a modal (e.g. locked-model explanation).
+    StatusMessage {
+        message: String,
+    },
     /// Emitted by the `/provider` picker on Esc so the next open can restore
     /// the browsing context — view mode and highlighted row.
     ProviderPickerDismissed {

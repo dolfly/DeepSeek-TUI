@@ -64,10 +64,25 @@ install_binary() {
   trap 'rm -f -- "${tmp}"' RETURN
   cp "${src}" "${tmp}"
   chmod 0755 "${tmp}"
+  # macOS AMFI kills ad-hoc linker-signed binaries after `cp` into a new
+  # path (SIGKILL on exec, no output). Re-sign in place with a proper
+  # ad-hoc signature so self-built dogfood installs run after install.
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v codesign >/dev/null 2>&1; then
+    codesign --force --sign - "${tmp}" >/dev/null 2>&1 || {
+      echo "WARN: codesign failed for ${tmp}; binary may be killed by AMFI after install" >&2
+    }
+  fi
   mv -f "${tmp}" "${dst}"
+  # Re-sign the final path as well — some macOS versions re-evaluate on rename.
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v codesign >/dev/null 2>&1; then
+    codesign --force --sign - "${dst}" >/dev/null 2>&1 || true
+  fi
   cmp -s "${src}" "${dst}" || {
-    echo "ERROR: installed binary differs from source: ${dst}" >&2
-    return 1
+    # cmp can fail after codesign rewrote the code signature; verify exec instead.
+    if [[ ! -x "${dst}" ]]; then
+      echo "ERROR: installed binary not executable: ${dst}" >&2
+      return 1
+    fi
   }
   trap - RETURN
 }

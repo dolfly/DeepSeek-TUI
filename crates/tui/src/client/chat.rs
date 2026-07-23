@@ -476,12 +476,50 @@ impl DeepSeekClient {
         {
             Ok(result) => result?,
             Err(_elapsed) => {
-                anyhow::bail!(
-                    "SSE stream request did not receive response headers after {}s. \
-                     `codewhale doctor` can still pass when non-streaming requests work; \
-                     on Windows or proxy networks, try `DEEPSEEK_FORCE_HTTP1=1` and rerun `codewhale`.",
-                    open_timeout.as_secs()
-                );
+                // Automatic HTTP/1.1 fallback when H2 fails to deliver stream
+                // headers within the open timeout. The HTTP/1.1 twin is built
+                // at client construction so Chat Completions, Anthropic, and
+                // Responses can share the same recovery path.
+                if !crate::client::force_http1_from_env() {
+                    crate::logging::warn(
+                        "SSE stream headers timed out over HTTP/2; retrying once with HTTP/1.1",
+                    );
+                    let retry = tokio_timeout(
+                        open_timeout,
+                        self.http1_fallback_client()
+                            .post(&url)
+                            .header(reqwest::header::CONTENT_TYPE, "application/json")
+                            .json(&body)
+                            .send(),
+                    )
+                    .await;
+                    match retry {
+                        Ok(Ok(resp)) => resp,
+                        Ok(Err(err)) => {
+                            anyhow::bail!(
+                                "SSE stream request failed after HTTP/1.1 fallback: {err}. \
+                                 `codewhale doctor` can still pass when non-streaming requests work; \
+                                 on Windows or proxy networks, try `CODEWHALE_FORCE_HTTP1=1` and rerun `codewhale`."
+                            );
+                        }
+                        Err(_elapsed) => {
+                            anyhow::bail!(
+                                "SSE stream request did not receive response headers after {}s \
+                                 (HTTP/2 and HTTP/1.1). `codewhale doctor` can still pass when \
+                                 non-streaming requests work; try `CODEWHALE_FORCE_HTTP1=1` and \
+                                 rerun `codewhale`.",
+                                open_timeout.as_secs()
+                            );
+                        }
+                    }
+                } else {
+                    anyhow::bail!(
+                        "SSE stream request did not receive response headers after {}s. \
+                         `codewhale doctor` can still pass when non-streaming requests work; \
+                         on Windows or proxy networks, try `CODEWHALE_FORCE_HTTP1=1` and rerun `codewhale`.",
+                        open_timeout.as_secs()
+                    );
+                }
             }
         };
 

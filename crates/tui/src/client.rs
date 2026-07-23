@@ -167,6 +167,9 @@ pub struct SpeechSynthesisResponse {
 #[must_use]
 pub struct DeepSeekClient {
     pub(super) http_client: reqwest::Client,
+    /// HTTP/1.1-only twin of [`Self::http_client`], used for automatic
+    /// stream-header fallback when H2 stalls. Same auth and headers.
+    pub(super) http1_client: reqwest::Client,
     api_key: String,
     /// Exact configured credential values removed from model-bound tool
     /// results. Structural redaction handles config/JSON assignments, while
@@ -426,6 +429,7 @@ impl Clone for DeepSeekClient {
     fn clone(&self) -> Self {
         Self {
             http_client: self.http_client.clone(),
+            http1_client: self.http1_client.clone(),
             api_key: self.api_key.clone(),
             model_bound_secret_values: Arc::clone(&self.model_bound_secret_values),
             base_url: self.base_url.clone(),
@@ -895,7 +899,7 @@ fn build_speech_synthesis_body(
 /// by `build_http_client` to opt out of HTTP/2 entirely when a provider's edge
 /// mishandles long-lived H2 streams (#103). Anything else (unset, `0`,
 /// `false`, ...) leaves HTTP/2 on.
-fn force_http1_from_env() -> bool {
+pub(crate) fn force_http1_from_env() -> bool {
     std::env::var("CODEWHALE_FORCE_HTTP1")
         .or_else(|_| std::env::var("DEEPSEEK_FORCE_HTTP1"))
         .ok()
@@ -1048,6 +1052,18 @@ impl DeepSeekClient {
             api_provider,
             &base_url,
             auth_disabled,
+            false,
+        )?;
+        // Always keep an HTTP/1.1 twin for automatic stream-header fallback
+        // when H2 stalls. When CODEWHALE_FORCE_HTTP1 is set, both clients are
+        // HTTP/1.1 and the fallback is a no-op retry path.
+        let http1_client = Self::build_http_client_with_auth_mode(
+            &api_key,
+            &http_headers,
+            api_provider,
+            &base_url,
+            auth_disabled,
+            true,
         )?;
 
         let wire_format = if api_provider == ApiProvider::OpenaiCodex {
@@ -1060,6 +1076,7 @@ impl DeepSeekClient {
 
         Ok(Self {
             http_client,
+            http1_client,
             api_key,
             model_bound_secret_values,
             base_url,
@@ -1143,6 +1160,7 @@ impl DeepSeekClient {
             api_provider,
             base_url,
             false,
+            false,
         )
     }
 
@@ -1152,6 +1170,7 @@ impl DeepSeekClient {
         api_provider: ApiProvider,
         base_url: &str,
         auth_disabled: bool,
+        force_http1: bool,
     ) -> Result<reqwest::Client> {
         let headers = build_default_headers(
             api_key,
@@ -1168,8 +1187,11 @@ impl DeepSeekClient {
             .http2_keep_alive_interval(Some(Duration::from_secs(15)))
             .http2_keep_alive_timeout(Duration::from_secs(20))
             .min_tls_version(reqwest::tls::Version::TLS_1_2);
-        if force_http1_from_env() {
-            logging::info("DEEPSEEK_FORCE_HTTP1=1 — pinning HTTP client to HTTP/1.1");
+        let pin_http1 = force_http1 || force_http1_from_env();
+        if pin_http1 {
+            if force_http1_from_env() && !force_http1 {
+                logging::info("CODEWHALE_FORCE_HTTP1=1 — pinning HTTP client to HTTP/1.1");
+            }
             builder = builder.http1_only();
         }
         if let Ok(cert_path) = std::env::var("SSL_CERT_FILE")
@@ -1178,6 +1200,12 @@ impl DeepSeekClient {
             builder = add_extra_root_certs(builder, &cert_path);
         }
         builder.build().map_err(Into::into)
+    }
+
+    /// HTTP/1.1 client for automatic stream-header fallback.
+    #[must_use]
+    pub(crate) fn http1_fallback_client(&self) -> &reqwest::Client {
+        &self.http1_client
     }
 
     #[cfg(test)]
