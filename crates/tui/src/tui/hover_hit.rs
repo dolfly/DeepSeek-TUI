@@ -4,7 +4,7 @@
 //! code blocks, file references, and tool cards. Keeps a cheap hit-test alive
 //! while streaming without forcing expensive transcript reflow.
 
-#![allow(dead_code)] // Public API surface; wired incrementally into mouse_ui / diffs.
+// Public API surface; hover_layer + mouse_ui consume these primitives.
 
 use ratatui::{
     layout::Rect,

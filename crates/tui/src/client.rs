@@ -2889,6 +2889,7 @@ mod anthropic;
 mod chat;
 mod provider_native_search;
 mod responses;
+mod stream_entry;
 
 fn extract_sse_data_value(line: &str) -> Option<&str> {
     line.strip_prefix("data:")

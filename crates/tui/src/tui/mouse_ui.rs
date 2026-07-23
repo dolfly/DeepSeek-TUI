@@ -459,8 +459,9 @@ pub(crate) fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> Vec<ViewEv
 
     match mouse.kind {
         MouseEventKind::Moved => {
-            // Update last mouse position for tooltip rendering.
+            // Update last mouse position for tooltip rendering + hover layer.
             app.last_mouse_pos = Some((mouse.column, mouse.row));
+            crate::tui::hover_layer::set_pointer(mouse.column, mouse.row);
 
             // Check sidebar sections for hover popovers. Only surface a
             // popover when the hovered row lost information in the compact

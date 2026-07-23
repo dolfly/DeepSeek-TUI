@@ -47,6 +47,7 @@ pub mod history;
 pub mod hot_tail;
 pub mod hotbar;
 pub mod hover_hit;
+pub mod hover_layer;
 pub mod key_actions;
 pub mod key_shortcuts;
 pub mod keybindings;
@@ -96,6 +97,7 @@ pub mod vim_mode;
 pub mod widgets;
 pub mod work_surface;
 pub mod workspace_context;
+pub mod worktree_manager;
 
 // === Re-exports ===
 

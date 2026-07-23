@@ -47,7 +47,8 @@ impl AgentLifecycle {
         )
     }
 
-    fn label(self) -> &'static str {
+    #[must_use]
+    pub fn label(self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::Running => "running",
@@ -58,15 +59,27 @@ impl AgentLifecycle {
         }
     }
 
-    fn color(self) -> Color {
+    /// Semantic status color only — never the whole-card identity tint.
+    /// cyan/teal = running, amber = waiting/pending, green = done, red = failed.
+    #[must_use]
+    pub fn color(self) -> Color {
         match self {
-            Self::Pending => palette::TEXT_MUTED,
-            Self::Running => palette::STATUS_WARNING,
+            // Waiting / queued: amber attention, not magenta identity.
+            Self::Pending => palette::STATUS_WARNING,
+            // Live work: teal/seafoam (not amber, not magenta).
+            Self::Running => palette::WHALE_LIVE,
             Self::Completed => palette::STATUS_SUCCESS,
             Self::Failed => palette::STATUS_ERROR,
             Self::Cancelled => palette::TEXT_MUTED,
+            // Interrupted is recoverable attention, same family as waiting.
             Self::Interrupted => palette::STATUS_WARNING,
         }
+    }
+
+    /// Magenta is reserved for agent identity marks only (glyph / role chip).
+    #[must_use]
+    pub fn identity_color() -> Color {
+        palette::MODE_OPERATE
     }
 }
 
@@ -374,9 +387,18 @@ impl FanoutCard {
     }
 
     fn aggregate_status(&self) -> AgentLifecycle {
+        self.aggregate_status_public()
+    }
+
+    /// Public aggregate lifecycle for the activity shelf and other projectors.
+    #[must_use]
+    pub fn aggregate_status_public(&self) -> AgentLifecycle {
         let (done, running, failed, pending) = self.counts();
-        if running > 0 || pending > 0 {
+        if running > 0 {
             AgentLifecycle::Running
+        } else if pending > 0 {
+            // Pending workers wait — amber attention, not "running" teal.
+            AgentLifecycle::Pending
         } else if self
             .workers
             .iter()
@@ -408,7 +430,9 @@ fn card_header(
 ) -> Line<'static> {
     let glyph = family_glyph(family);
     let verb = family_label(family);
-    let header_color = status.color();
+    // Magenta only on the identity mark; status color on the lifecycle chip.
+    let identity_color = AgentLifecycle::identity_color();
+    let status_color = status.color();
     let glyph_text = format!("{glyph} ");
     let status_text = format!("[{}]", status.label());
     // #4148: an `agent_type` that already reads as the verb (e.g. "delegate")
@@ -432,13 +456,13 @@ fn card_header(
         Span::styled(
             glyph_text,
             Style::default()
-                .fg(header_color)
+                .fg(identity_color)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             verb.to_string(),
             Style::default()
-                .fg(header_color)
+                .fg(identity_color)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
@@ -450,7 +474,7 @@ fn card_header(
         ));
         spans.push(Span::raw(" "));
     }
-    spans.push(Span::styled(status_text, Style::default().fg(header_color)));
+    spans.push(Span::styled(status_text, Style::default().fg(status_color)));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(
         detail,

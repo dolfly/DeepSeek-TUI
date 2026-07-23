@@ -4376,6 +4376,26 @@ async fn run_event_loop(
             .set_low_motion(motion_policy.as_low_motion());
         stream_display_clock.set_allow_catch_up(motion_policy.allows_catch_up_bursts());
 
+        // Content-driven cadence: atmosphere rate when only ocean life moves;
+        // full interactive rate while streaming, selecting, typing, or hovering.
+        {
+            use crate::tui::display_refresh::{
+                cadence_tier_from_signals, content_driven_draw_interval, probe_display_refresh,
+            };
+            let tier = cadence_tier_from_signals(
+                app.is_loading || has_running_agents,
+                app.viewport.transcript_selection.is_active(),
+                !app.input.is_empty(),
+                crate::tui::hover_layer::current_hover().is_some(),
+            );
+            let probe = probe_display_refresh();
+            frame_rate_limiter.set_adaptive_interval(Some(content_driven_draw_interval(
+                tier,
+                probe.hz,
+                motion_policy.uses_constrained_frame_rate(),
+            )));
+        }
+
         let draw_wait = if app.needs_redraw {
             frame_rate_limiter.time_until_next_draw(now)
         } else {
@@ -5575,6 +5595,23 @@ async fn run_event_loop(
                         && detail_target_cell_index(app)
                             .is_some_and(|idx| app.toggle_tool_run_expansion_at(idx)) =>
                 {
+                    continue;
+                }
+                // Activity shelf: Enter expands/collapses concurrent sub-agent
+                // banners when the composer is empty and live agents > 1.
+                KeyCode::Enter
+                    if key.modifiers == KeyModifiers::NONE
+                        && app.input.is_empty()
+                        && running_agent_count(app) > 1 =>
+                {
+                    app.activity_shelf_expanded = !app.activity_shelf_expanded;
+                    app.status_message = Some(if app.activity_shelf_expanded {
+                        "Sub-agent shelf expanded".into()
+                    } else {
+                        "Sub-agent shelf collapsed".into()
+                    });
+                    app.mark_history_updated();
+                    app.needs_redraw = true;
                     continue;
                 }
                 KeyCode::Char('l')
@@ -10736,6 +10773,16 @@ async fn apply_command_result(
                     app.view_stack.push(ConfigView::new_for_app(app));
                 }
             }
+            AppAction::OpenWorktreeManager => {
+                if app.view_stack.top_kind() != Some(ModalKind::WorktreeManager) {
+                    // Non-blocking: git_status caches; manager never shells on paint.
+                    crate::tui::git_status::refresh_if_stale(&app.workspace);
+                    app.view_stack
+                        .push(crate::tui::worktree_manager::WorktreeManagerView::new(
+                            app.workspace.clone(),
+                        ));
+                }
+            }
             AppAction::OpenModelPicker => {
                 if app.view_stack.top_kind() != Some(ModalKind::ModelPicker) {
                     app.view_stack
@@ -13583,6 +13630,29 @@ async fn handle_view_events(
                     view: Some(view),
                     selected_row_id,
                 });
+            }
+            ViewEvent::ModelPickerRefresh => {
+                // Re-resolve readiness from the live credential state and
+                // rebuild catalog rows. Non-destructive: never clears the list
+                // when a refresh fails; just re-project from current config.
+                sync_config_provider_from_app(config, app);
+                if app.view_stack.top_kind() == Some(ModalKind::ModelPicker)
+                    && let Some(mut boxed) = app.view_stack.pop()
+                {
+                    if let Some(picker) = boxed
+                        .as_any_mut()
+                        .downcast_mut::<crate::tui::model_picker::ModelPickerView>(
+                    ) {
+                        picker.re_resolve_from_app(app, config);
+                        app.status_message =
+                            Some("Model readiness refreshed · catalog rows rebuilt".into());
+                    }
+                    app.view_stack.push_boxed(boxed);
+                } else {
+                    app.status_message =
+                        Some("Open /model to refresh readiness and catalog".into());
+                }
+                app.needs_redraw = true;
             }
             ViewEvent::ModelPickerNeedsAuth {
                 provider,

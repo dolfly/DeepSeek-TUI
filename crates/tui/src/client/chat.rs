@@ -54,14 +54,8 @@ fn stream_idle_timeout_message(
     stream_age: Duration,
     since_last_chunk: Duration,
 ) -> String {
-    format!(
-        "SSE stream idle timeout after {}s — no data received \
-         (bytes_received={}, stream_age_ms={}, ms_since_last_chunk={})",
-        idle.as_secs(),
-        bytes_received,
-        stream_age.as_millis(),
-        since_last_chunk.as_millis(),
-    )
+    // Shared seam: Chat Completions / Anthropic / Responses keep one message shape.
+    super::stream_entry::idle_timeout_message(idle, bytes_received, stream_age, since_last_chunk)
 }
 
 use crate::config::ApiProvider;

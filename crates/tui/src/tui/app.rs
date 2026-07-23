@@ -2338,6 +2338,9 @@ pub struct App {
     /// spawned by the same `rlm` invocation route into this card; reset
     /// when a fresh fanout-family tool call starts.
     pub last_fanout_card_index: Option<usize>,
+    /// When false (default), concurrent live sub-agent cards collapse into
+    /// one activity-shelf row (`◇ N sub-agents · Enter expand`).
+    pub activity_shelf_expanded: bool,
     /// Most recently observed sub-agent dispatch tool name (set on
     /// `ToolCallStarted` for `agent` / `rlm` / etc., cleared
     /// after the first `Started` mailbox envelope routes through it).
@@ -3630,6 +3633,7 @@ impl App {
             expanded_sidebar_agents: HashSet::new(),
             agent_progress_meta: HashMap::new(),
             subagent_card_index: HashMap::new(),
+            activity_shelf_expanded: false,
             last_fanout_card_index: None,
             pending_subagent_dispatch: None,
             agent_activity_started_at: None,
@@ -7779,6 +7783,8 @@ pub enum AppAction {
     },
     OpenConfigEditor(ConfigUiMode),
     OpenConfigView,
+    /// Open the native git worktree manager.
+    OpenWorktreeManager,
     /// Open the `/model` two-pane picker (Pro/Flash + Off/High/Max).
     OpenModelPicker,
     /// Open the `/provider` picker modal — DeepSeek / NVIDIA NIM / OpenRouter

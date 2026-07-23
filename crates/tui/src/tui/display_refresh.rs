@@ -200,6 +200,44 @@ pub fn draw_min_interval_for_hz(display_hz: Option<u32>, low_motion: bool) -> Du
     Duration::from_nanos(nanos).max(MIN_FRAME_INTERVAL)
 }
 
+/// Content-driven draw cadence: atmosphere rate when only ambience moves;
+/// full rate for stream / selection / input / hover.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawCadenceTier {
+    /// Only ambient life / ocean breath — use atmosphere interval.
+    Atmosphere,
+    /// Streaming, selection, input, or interactive hover — full draw cap.
+    Interactive,
+}
+
+/// Choose the draw min-interval for the current content tier.
+#[must_use]
+pub fn content_driven_draw_interval(
+    tier: DrawCadenceTier,
+    display_hz: Option<u32>,
+    low_motion: bool,
+) -> Duration {
+    match tier {
+        DrawCadenceTier::Atmosphere => animation_interval_for_hz(display_hz, low_motion),
+        DrawCadenceTier::Interactive => draw_min_interval_for_hz(display_hz, low_motion),
+    }
+}
+
+/// Infer cadence tier from coarse app activity signals.
+#[must_use]
+pub fn cadence_tier_from_signals(
+    streaming_or_loading: bool,
+    selection_active: bool,
+    input_nonempty: bool,
+    pointer_hover_active: bool,
+) -> DrawCadenceTier {
+    if streaming_or_loading || selection_active || input_nonempty || pointer_hover_active {
+        DrawCadenceTier::Interactive
+    } else {
+        DrawCadenceTier::Atmosphere
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -598,7 +598,18 @@ pub fn apply_caustic_shimmer(
         let protected = lines
             .get(usize::from(local_y))
             .and_then(occupied_text_bounds);
-        let row_bg = column.color_at_y(area.y.saturating_add(local_y));
+        let ramp = frame_ocean_ramp(
+            column,
+            area.height,
+            area.y,
+            elapsed_ms,
+            column.phase_tag(),
+            column.ramp_fingerprint(),
+        );
+        let row_bg = ramp
+            .get(usize::from(local_y))
+            .copied()
+            .unwrap_or_else(|| column.color_at_y(area.y.saturating_add(local_y)));
         for local_x in (0..area.width).step_by(3) {
             if protected.is_some_and(|(start, end)| {
                 usize::from(local_x) >= start && usize::from(local_x) < end
@@ -623,8 +634,7 @@ pub fn apply_caustic_shimmer(
 }
 
 /// Cached ocean row colors invalidated only when phase/dimensions/palette/breath tick.
-/// Wired into chat widget frames incrementally; public for renderer owners.
-#[allow(dead_code)]
+/// Shared across widgets that paint the same [`OceanColumn`] within a frame.
 #[derive(Debug, Clone, Default)]
 pub struct OceanRampCache {
     colors: Vec<Color>,
@@ -671,6 +681,37 @@ impl OceanRampCache {
         self.ramp_fingerprint = ramp_fingerprint;
         &self.colors
     }
+}
+
+thread_local! {
+    static FRAME_RAMP: std::cell::RefCell<OceanRampCache> =
+        const { std::cell::RefCell::new(OceanRampCache {
+            colors: Vec::new(),
+            height: 0,
+            top: 0,
+            elapsed_bucket: 0,
+            phase_tag: 0,
+            ramp_fingerprint: 0,
+        }) };
+}
+
+/// Process-local per-frame ocean ramp shared by chat field, caustics, and
+/// other widgets that paint the same column.
+#[must_use]
+pub fn frame_ocean_ramp(
+    column: &OceanColumn,
+    height: u16,
+    top: u16,
+    elapsed_ms: u128,
+    phase_tag: u8,
+    ramp_fingerprint: u64,
+) -> Vec<Color> {
+    FRAME_RAMP.with(|cache| {
+        cache
+            .borrow_mut()
+            .colors_for(column, height, top, elapsed_ms, phase_tag, ramp_fingerprint)
+            .to_vec()
+    })
 }
 
 #[cfg(test)]

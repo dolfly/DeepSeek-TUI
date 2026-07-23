@@ -410,6 +410,43 @@ impl ModalView for ContextMenuView {
     }
 }
 
+/// Append git-oriented actions when a path is known (worktree manager entry).
+#[must_use]
+pub fn with_git_actions(
+    mut entries: Vec<ContextMenuEntry>,
+    path: Option<&str>,
+    branch: Option<&str>,
+) -> Vec<ContextMenuEntry> {
+    let Some(path) = path.filter(|p| !p.is_empty()) else {
+        return entries;
+    };
+    for (label, id) in crate::tui::worktree_manager::context_menu_git_actions(path, branch) {
+        let action = if id == "worktrees" {
+            ContextMenuAction::ExecuteCommand {
+                command: "/workspace worktrees".into(),
+            }
+        } else if let Some(rest) = id.strip_prefix("diff:") {
+            ContextMenuAction::ExecuteCommand {
+                command: format!("/diff {rest}"),
+            }
+        } else if let Some(rest) = id.strip_prefix("open:") {
+            ContextMenuAction::ExecuteCommand {
+                command: format!("/open {rest}"),
+            }
+        } else {
+            ContextMenuAction::CopyText {
+                text: label.clone(),
+            }
+        };
+        entries.push(
+            ContextMenuEntry::new(label, id, action)
+                .with_glyph("⌥")
+                .section_start(),
+        );
+    }
+    entries
+}
+
 fn default_glyph_for(action: &ContextMenuAction) -> String {
     // Best-effort icons from the action discriminant name.
     let name = format!("{action:?}");

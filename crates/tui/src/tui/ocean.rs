@@ -150,6 +150,35 @@ impl OceanColumn {
         self.completion_elapsed_ms
     }
 
+    /// Compact phase discriminator for [`crate::tui::ambient_life::OceanRampCache`].
+    #[must_use]
+    pub fn phase_tag(self) -> u8 {
+        match self.phase {
+            ShellPhase::Idle => 0,
+            ShellPhase::Typing => 1,
+            ShellPhase::Working => 2,
+            ShellPhase::Verifying => 3,
+            ShellPhase::Waiting => 4,
+            ShellPhase::Approval => 5,
+            ShellPhase::Done => 6,
+            ShellPhase::Failed => 7,
+        }
+    }
+
+    /// Fingerprint of the ramp palette + animation flags for cache invalidation.
+    #[must_use]
+    pub fn ramp_fingerprint(self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        // Color is not Hash; hash the discriminant path via Debug-ish tags.
+        self.animated.hash(&mut h);
+        self.completion_elapsed_ms.is_some().hash(&mut h);
+        self.phase_tag().hash(&mut h);
+        self.top.hash(&mut h);
+        self.height.hash(&mut h);
+        h.finish()
+    }
+
     #[must_use]
     pub fn with_viewport(mut self, viewport: Rect) -> Self {
         self.top = viewport.y;

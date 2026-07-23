@@ -1638,6 +1638,24 @@ fn format_picker_context_window(tokens: u32) -> String {
     }
 }
 
+impl ModelPickerView {
+    /// Rebuild model rows from a fresh app/config snapshot (readiness + catalog).
+    pub fn re_resolve_from_app(&mut self, app: &App, config: &Config) {
+        self.provider_health = app.provider_health.clone();
+        self.route_config = config.clone();
+        self.model_rows = picker_model_rows_for_app(app, config);
+        self.configured_providers = configured_providers(config, app.api_provider)
+            .into_iter()
+            .filter(|provider| *provider != app.api_provider)
+            .collect();
+        // Keep selection stable when the row still exists.
+        let rows = self.visible_model_rows();
+        if self.selected_model_idx >= rows.len() + usize::from(self.show_custom_model_row) {
+            self.selected_model_idx = rows.len().saturating_sub(1);
+        }
+    }
+}
+
 impl ModalView for ModelPickerView {
     fn kind(&self) -> ModalKind {
         ModalKind::ModelPicker
@@ -1740,6 +1758,15 @@ impl ModalView for ModelPickerView {
             KeyCode::Tab | KeyCode::Right | KeyCode::Left | KeyCode::BackTab => {
                 self.toggle_focus();
                 ViewAction::None
+            }
+            // Explicit readiness + catalog refresh (safe, non-destructive).
+            KeyCode::Char('r') | KeyCode::Char('R')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
+                    || (key.modifiers.is_empty() && self.query.is_empty()) =>
+            {
+                ViewAction::Emit(ViewEvent::ModelPickerRefresh)
             }
             _ => ViewAction::None,
         }

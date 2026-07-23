@@ -9,6 +9,7 @@ pub mod key_hint;
 // evaluate the rendering in isolation. The follow-up PR plumbs it through
 // the composer area in `ui.rs`. `pub mod` (vs the usual `pub use` pattern)
 // keeps the unused-imports lint quiet until then.
+pub mod activity_shelf;
 pub mod agent_card;
 pub mod decision_card;
 pub mod pending_input_preview;
@@ -228,7 +229,21 @@ impl ChatWidget {
                 collapsed_tool_indices.insert(run.start + offset);
             }
         }
-        let has_collapsed = !app.collapsed_cells.is_empty() || !collapsed_run_starts.is_empty();
+
+        // Activity shelf: collapse concurrent live sub-agent cards into one row.
+        let (shelf_hidden, shelf_summary_cells) = activity_shelf_collapse(
+            &app.history,
+            active_entries,
+            history_len,
+            app.activity_shelf_expanded,
+        );
+        for idx in &shelf_hidden {
+            collapsed_tool_indices.insert(*idx);
+        }
+
+        let has_collapsed = !app.collapsed_cells.is_empty()
+            || !collapsed_run_starts.is_empty()
+            || !shelf_hidden.is_empty();
 
         // Fast path: no collapsed cells — use original slices directly.
         if !has_collapsed {
@@ -267,11 +282,12 @@ impl ChatWidget {
             // up front so the ref list can borrow from a stable Vec —
             // avoiding the per-frame deep clone of every visible cell that
             // this path used to pay (#3896).
-            let summary_cells: Vec<(usize, HistoryCell)> = tool_runs
+            let mut summary_cells: Vec<(usize, HistoryCell)> = tool_runs
                 .iter()
                 .filter(|run| collapsed_run_starts.contains(&run.start))
                 .map(|run| (run.start, tool_run_summary_cell(run)))
                 .collect();
+            summary_cells.extend(shelf_summary_cells);
             let summary_cell_for = |idx: usize| -> Option<&HistoryCell> {
                 summary_cells
                     .iter()
@@ -307,6 +323,18 @@ impl ChatWidget {
                     filtered_to_original.push(idx);
                     continue;
                 }
+                if let Some(summary) = summary_cell_for(idx) {
+                    // Activity shelf head: synthetic collapsed projector.
+                    filtered_cells.push(summary);
+                    filtered_revs.push(
+                        history_entry_revision(
+                            app.history_revisions.get(idx).copied().unwrap_or(0),
+                        )
+                        .wrapping_add(0xA11C_5E1F), // shelf domain salt
+                    );
+                    filtered_to_original.push(idx);
+                    continue;
+                }
                 filtered_cells.push(cell);
                 filtered_revs.push(history_entry_revision(app.history_revisions[idx]));
                 filtered_to_original.push(idx);
@@ -333,6 +361,13 @@ impl ChatWidget {
                             history_len,
                             active_rev,
                         ));
+                        filtered_to_original.push(original_idx);
+                        continue;
+                    }
+                    if let Some(summary) = summary_cell_for(original_idx) {
+                        filtered_cells.push(summary);
+                        let salt = (i as u64).wrapping_add(0xA11C_5E1F);
+                        filtered_revs.push(active_entry_revision(active_rev, salt));
                         filtered_to_original.push(original_idx);
                         continue;
                     }
@@ -600,6 +635,62 @@ fn tool_run_summary_cell(run: &ToolRun) -> HistoryCell {
     }))
 }
 
+/// Collapse concurrent live sub-agent cards into a single activity shelf row.
+///
+/// Returns (hidden secondary indices, synthetic shelf cells at head indices).
+fn activity_shelf_collapse(
+    history: &[HistoryCell],
+    active_entries: &[HistoryCell],
+    history_len: usize,
+    expanded: bool,
+) -> (HashSet<usize>, Vec<(usize, HistoryCell)>) {
+    use crate::tui::history::SubAgentCell;
+    use crate::tui::widgets::activity_shelf::{ActivityShelf, ShelfAgent};
+
+    let mut live: Vec<(usize, ShelfAgent)> = Vec::new();
+    for (idx, cell) in history.iter().enumerate() {
+        if let HistoryCell::SubAgent(sub) = cell
+            && sub.is_live_for_shelf()
+            && let Some(agent) = sub.as_shelf_agent()
+        {
+            live.push((idx, agent));
+        }
+    }
+    for (i, cell) in active_entries.iter().enumerate() {
+        if let HistoryCell::SubAgent(sub) = cell
+            && sub.is_live_for_shelf()
+            && let Some(agent) = sub.as_shelf_agent()
+        {
+            live.push((history_len + i, agent));
+        }
+    }
+
+    if live.len() < 2 {
+        return (HashSet::new(), Vec::new());
+    }
+
+    let agents: Vec<ShelfAgent> = live.iter().map(|(_, a)| a.clone()).collect();
+    let shelf = ActivityShelf::new(agents, expanded);
+    let head_idx = live[0].0;
+
+    if expanded {
+        // Expanded: keep every card; optional header is drawn only via shelf
+        // when we still want a collapse affordance on the head.
+        let summary = HistoryCell::SubAgent(SubAgentCell::Shelf(shelf));
+        // Prepend collapse header by wrapping head — actually leave cards
+        // alone when expanded so each agent keeps its full detail surface.
+        let _ = summary;
+        return (HashSet::new(), Vec::new());
+    }
+
+    let mut hidden = HashSet::new();
+    for (idx, _) in live.iter().skip(1) {
+        hidden.insert(*idx);
+    }
+    let summary = HistoryCell::SubAgent(SubAgentCell::Shelf(shelf));
+    (hidden, vec![(head_idx, summary)])
+}
+
 fn tool_run_summary_revision(
     run: &ToolRun,
     revisions: &[u64],
@@ -668,6 +759,7 @@ impl Renderable for ChatWidget {
         );
 
         let area = _area;
+        crate::tui::hover_layer::begin_frame();
 
         // Repaint the full chat area with the codewhale-ink background each
         // frame. Ratatui's `Paragraph` only writes cells that contain text,
@@ -723,6 +815,32 @@ impl Renderable for ChatWidget {
                 self.jump_arrow,
             );
         }
+
+        // Hover: register OSC-8 link regions (copyable), then apply aura.
+        let link_area = Rect {
+            width: area
+                .width
+                .saturating_sub(u16::from(self.scrollbar.is_some())),
+            ..area
+        };
+        for region in crate::tui::osc8::link_regions_for_lines(link_area, &self.line_links) {
+            let width = region
+                .col_end
+                .saturating_sub(region.col_start)
+                .saturating_add(1);
+            let hit = Rect::new(region.col_start, region.row, width, 1);
+            crate::tui::hover_layer::register_rect(
+                crate::tui::hover_hit::HoverTargetKind::Link,
+                hit,
+                region.target,
+                true,
+            );
+        }
+        crate::tui::hover_layer::apply_resolved_effects(
+            buf,
+            !self.ocean_animated,
+            self.scroll_thumb,
+        );
     }
 
     fn desired_height(&self, _width: u16) -> u16 {
@@ -738,12 +856,26 @@ impl ChatWidget {
     /// ocean.
     fn render_underwater_field(&self, area: Rect, buf: &mut Buffer) {
         if let Some(column) = self.ocean_column {
+            // Cache per-row ocean colors; invalidate only on phase/size/breath.
+            let phase_tag = column.phase_tag();
+            let fingerprint = column.ramp_fingerprint();
+            let ramp = crate::tui::ambient_life::frame_ocean_ramp(
+                &column,
+                area.height,
+                area.y,
+                self.ocean_elapsed_ms,
+                phase_tag,
+                fingerprint,
+            );
             for local_y in 0..area.height {
                 let protected = self
                     .lines
                     .get(usize::from(local_y))
                     .and_then(occupied_text_bounds);
-                let row_bg = column.color_at_y(area.y.saturating_add(local_y));
+                let row_bg = ramp
+                    .get(usize::from(local_y))
+                    .copied()
+                    .unwrap_or_else(|| column.color_at_y(area.y.saturating_add(local_y)));
                 for local_x in 0..area.width {
                     let is_protected = protected.is_some_and(|(start, end)| {
                         usize::from(local_x) >= start && usize::from(local_x) < end

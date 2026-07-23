@@ -57,6 +57,8 @@ pub enum ModalKind {
     ContextMenu,
     ContextInspector,
     SkillsManager,
+    /// Native git worktree manager (list / create / switch / compare).
+    WorktreeManager,
 }
 
 /// Clear and paint a modal popup with an opaque surface.
@@ -715,6 +717,8 @@ pub enum ViewEvent {
     },
     /// Enter on a locked (unauthenticated) model: explain why selection is
     /// blocked and open the provider auth/setup path when possible.
+    /// Re-resolve readiness + rebuild catalog rows for the open model picker.
+    ModelPickerRefresh,
     ModelPickerNeedsAuth {
         provider: crate::config::ApiProvider,
         model: String,
@@ -1224,6 +1228,76 @@ enum ConfigSection {
     Experimental,
 }
 
+/// App-style settings tabs (v0.9.1 redesign). Groups fine-grained sections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigTab {
+    General,
+    Models,
+    Permissions,
+    Display,
+    Advanced,
+}
+
+impl ConfigTab {
+    const ALL: [ConfigTab; 5] = [
+        ConfigTab::General,
+        ConfigTab::Models,
+        ConfigTab::Permissions,
+        ConfigTab::Display,
+        ConfigTab::Advanced,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            ConfigTab::General => "General",
+            ConfigTab::Models => "Models",
+            ConfigTab::Permissions => "Permissions",
+            ConfigTab::Display => "Display",
+            ConfigTab::Advanced => "Advanced",
+        }
+    }
+
+    fn contains(self, section: ConfigSection) -> bool {
+        match self {
+            ConfigTab::General => matches!(
+                section,
+                ConfigSection::Provider
+                    | ConfigSection::Network
+                    | ConfigSection::Composer
+                    | ConfigSection::Sidebar
+                    | ConfigSection::History
+            ),
+            ConfigTab::Models => matches!(section, ConfigSection::Model),
+            ConfigTab::Permissions => matches!(section, ConfigSection::Permissions),
+            ConfigTab::Display => matches!(section, ConfigSection::Display),
+            ConfigTab::Advanced => matches!(
+                section,
+                ConfigSection::Mcp | ConfigSection::Fleet | ConfigSection::Experimental
+            ),
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            ConfigTab::General => ConfigTab::Models,
+            ConfigTab::Models => ConfigTab::Permissions,
+            ConfigTab::Permissions => ConfigTab::Display,
+            ConfigTab::Display => ConfigTab::Advanced,
+            ConfigTab::Advanced => ConfigTab::General,
+        }
+    }
+
+    fn prev(self) -> Self {
+        match self {
+            ConfigTab::General => ConfigTab::Advanced,
+            ConfigTab::Models => ConfigTab::General,
+            ConfigTab::Permissions => ConfigTab::Models,
+            ConfigTab::Display => ConfigTab::Permissions,
+            ConfigTab::Advanced => ConfigTab::Display,
+        }
+    }
+}
+
 impl ConfigSection {
     fn label(self, locale: Locale) -> Cow<'static, str> {
         tr(
@@ -1282,6 +1356,8 @@ pub struct ConfigView {
     last_choice_hitboxes: RefCell<Vec<(u16, usize)>>,
     last_mouse_selected: Option<usize>,
     api_provider: ApiProvider,
+    /// Category tab for the app-style settings shell (v0.9.1).
+    active_tab: ConfigTab,
 }
 
 const CONFIG_MIN_KEY_COLUMN_WIDTH: usize = 19;
@@ -1824,6 +1900,7 @@ impl ConfigView {
             last_choice_hitboxes: RefCell::new(Vec::new()),
             last_mouse_selected: None,
             api_provider: app.api_provider,
+            active_tab: ConfigTab::General,
         }
     }
 
@@ -1896,9 +1973,14 @@ impl ConfigView {
     fn visible_items(&self) -> Vec<ConfigListItem> {
         let mut items = Vec::new();
         let mut current_section = None;
+        let filtering = !self.filter.is_empty();
 
         for (idx, row) in self.rows.iter().enumerate() {
             if !self.row_matches_filter(row) {
+                continue;
+            }
+            // Category tabs filter sections unless the user is searching.
+            if !filtering && !self.active_tab.contains(row.section) {
                 continue;
             }
 
@@ -1910,6 +1992,43 @@ impl ConfigView {
         }
 
         items
+    }
+
+    fn select_first_visible_row(&mut self) {
+        if let Some(idx) = self
+            .visible_items()
+            .into_iter()
+            .find_map(|item| match item {
+                ConfigListItem::Row(i) => Some(i),
+                ConfigListItem::Section(_) => None,
+            })
+        {
+            self.selected = idx;
+            self.scroll = 0;
+        }
+    }
+
+    fn setting_description(key: &str) -> &'static str {
+        match key {
+            "provider" => "Active model provider for this session. Scope: saved route.",
+            "model" => "Model id for the active provider. Scope: saved / session route.",
+            "approval_mode" => {
+                "Session approval posture (ask / auto). Separate from filesystem sandbox."
+            }
+            "permission_posture" | "approval_policy" => {
+                "Saved permission posture. Independent of filesystem sandbox (fs:* chrome)."
+            }
+            "allow_shell" => "Whether shell tools may run. Separate from approval posture.",
+            "sandbox_mode" => "Filesystem sandbox: none / workspace-write / read-only.",
+            "theme" => "Named UI theme. Scope: saved settings.",
+            "low_motion" => "Reduce motion: freezes pulses, keeps static highlights.",
+            "calm_mode" => "Quieter chrome and denser transcript.",
+            "ocean_treatment" => "Underwater field treatment (ombre / flat / terminal).",
+            "locale" => "UI language. Scope: saved settings.",
+            "reasoning_effort" => "Default reasoning effort for capable models.",
+            "default_mode" => "Startup mode (agent / plan / operate).",
+            _ => "Enter change · R reset · Esc close. Scope shown on the row badge.",
+        }
     }
 
     fn key_column_width(&self) -> usize {
@@ -2966,6 +3085,20 @@ impl ModalView for ConfigView {
                 }
             }
             KeyCode::Char('q') if self.filter.is_empty() => ViewAction::Close,
+            KeyCode::Tab
+                if !key.modifiers.contains(KeyModifiers::SHIFT) && self.filter.is_empty() =>
+            {
+                self.active_tab = self.active_tab.next();
+                self.select_first_visible_row();
+                ViewAction::None
+            }
+            KeyCode::BackTab | KeyCode::Tab
+                if key.modifiers.contains(KeyModifiers::SHIFT) && self.filter.is_empty() =>
+            {
+                self.active_tab = self.active_tab.prev();
+                self.select_first_visible_row();
+                ViewAction::None
+            }
             KeyCode::Up => {
                 self.move_selection(-1);
                 ViewAction::None
@@ -3335,7 +3468,7 @@ impl ModalView for ConfigView {
             };
 
             let table_width = usize::from(inner.width).saturating_sub(usize::from(scrollable));
-            let (key_column_width, value_column_width, scope_column_width) =
+            let (key_column_width, value_column_width, _scope_column_width) =
                 self.table_column_widths(table_width);
             let search_line = Line::from(vec![
                 Span::styled("  Search: ", Style::default().fg(palette::TEXT_MUTED)),
@@ -3345,8 +3478,28 @@ impl ModalView for ConfigView {
                     Style::default().fg(palette::TEXT_MUTED),
                 ),
             ]);
+            // Category tabs — app-style shell, not ASCII table headers.
+            let mut tab_spans = Vec::new();
+            for (i, tab) in ConfigTab::ALL.iter().enumerate() {
+                if i > 0 {
+                    tab_spans.push(Span::styled("  ", Style::default()));
+                }
+                let active = *tab == self.active_tab;
+                tab_spans.push(Span::styled(
+                    format!(" {} ", tab.label()),
+                    if active {
+                        Style::default()
+                            .fg(palette::SELECTION_TEXT)
+                            .bg(palette::WHALE_ACTION)
+                            .add_modifier(ratatui::style::Modifier::BOLD)
+                    } else {
+                        Style::default().fg(palette::TEXT_MUTED)
+                    },
+                ));
+            }
+            let tab_line = Line::from(tab_spans);
             let mut lines: Vec<Line> = if compact {
-                vec![search_line]
+                vec![tab_line, search_line]
             } else {
                 vec![
                     Line::from(vec![
@@ -3355,36 +3508,13 @@ impl ModalView for ConfigView {
                             Style::default().fg(palette::WHALE_ACTION).bold(),
                         ),
                         Span::styled(
-                            format!(" — {}", self.tr(MessageId::ConfigSubtitle)),
-                            Style::default().fg(palette::TEXT_MUTED),
+                            "  Tab/Shift+Tab categories",
+                            Style::default().fg(palette::TEXT_HINT),
                         ),
                     ]),
+                    tab_line,
                     search_line,
                     Line::from(""),
-                    Line::from(format!(
-                        "  {} {} {}",
-                        fit_config_column(
-                            &self.tr(MessageId::ConfigColumnSetting),
-                            key_column_width
-                        ),
-                        fit_config_column(
-                            &self.tr(MessageId::ConfigColumnValue),
-                            value_column_width
-                        ),
-                        fit_config_column(
-                            &self.tr(MessageId::ConfigColumnScope),
-                            scope_column_width
-                        )
-                    )),
-                    Line::from(format!(
-                        "  {}",
-                        "-".repeat(
-                            key_column_width
-                                + value_column_width
-                                + scope_column_width
-                                + CONFIG_COLUMN_GAPS_WIDTH
-                        )
-                    )),
                 ]
             };
             let mut row_hitboxes = Vec::new();
@@ -3392,9 +3522,10 @@ impl ModalView for ConfigView {
             for item in items.iter().skip(start).take(visible_rows) {
                 match item {
                     ConfigListItem::Section(section) => {
+                        lines.push(Line::from(""));
                         lines.push(Line::from(Span::styled(
                             format!("  {}", section.label(self.locale)),
-                            Style::default().fg(palette::WHALE_INFO).bold(),
+                            Style::default().fg(palette::TEXT_HINT).bold(),
                         )));
                     }
                     ConfigListItem::Row(idx) => {
@@ -3416,13 +3547,53 @@ impl ModalView for ConfigView {
                         let key = fit_config_column(&label, key_column_width);
                         let value =
                             fit_config_column(&self.row_display_value(row), value_column_width);
-                        let scope =
-                            fit_config_column(&row.scope.label(self.locale), scope_column_width);
-                        let mut line = Line::from(format!("  {key} {value} {scope}"));
-                        line.style = style;
+                        // Quiet saved / session badges (not a full scope column shout).
+                        let scope_badge = match row.scope {
+                            ConfigScope::Saved => "saved",
+                            ConfigScope::Session => "session",
+                        };
+                        let rail = if selected { "▌" } else { " " };
+                        let mut line = Line::from(vec![
+                            Span::styled(
+                                rail,
+                                Style::default().fg(if selected {
+                                    palette::WHALE_ACTION
+                                } else {
+                                    palette::TEXT_DIM
+                                }),
+                            ),
+                            Span::styled(format!("{key}  {value}  "), style),
+                            Span::styled(
+                                scope_badge,
+                                Style::default()
+                                    .fg(palette::TEXT_HINT)
+                                    .add_modifier(ratatui::style::Modifier::DIM),
+                            ),
+                        ]);
+                        if selected {
+                            line.style = line.style.bg(palette::SELECTION_BG);
+                        }
                         lines.push(line);
                     }
                 }
+            }
+
+            // Description pane for the selected setting.
+            if let Some(row) = self.rows.get(self.selected) {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "────────────────────────────────────────",
+                    Style::default().fg(palette::TEXT_DIM),
+                )));
+                let desc = Self::setting_description(&row.key);
+                lines.push(Line::from(Span::styled(
+                    format!("  {desc}"),
+                    Style::default().fg(palette::TEXT_MUTED),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "  Enter change · R reset · Esc close",
+                    Style::default().fg(palette::TEXT_HINT),
+                )));
             }
             *self.last_row_hitboxes.borrow_mut() = row_hitboxes;
 
@@ -3582,6 +3753,9 @@ pub(crate) fn subagent_view_agents(
                         ));
                     }
                 }
+            }
+            HistoryCell::SubAgent(SubAgentCell::Shelf(_)) => {
+                // Synthetic shelf projector — agents already counted via live cards.
             }
             _ => {}
         }

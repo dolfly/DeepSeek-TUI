@@ -120,9 +120,9 @@ fn session_cache_hit_percentage(app: &App) -> Option<u8> {
     Some(((hit * 100 + total / 2) / total) as u8)
 }
 
-/// Paint the one-line phase band. Owns phase, optional working detail, cost,
-/// configured session cache rate, and detail-key hints — never route/context
-/// (header) or Tasks/To-do (work surface).
+/// Paint the one-line phase rail. Compact left marker (icon + verb + duration)
+/// instead of a full-width routine phase band. Amber only for approval/waiting;
+/// cyan/teal for routine work.
 pub fn render(area: Rect, buf: &mut Buffer, app: &mut App) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -131,12 +131,15 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &mut App) {
     let activity = LiveActivity::from_app(app);
     let phase = ShellPhase::from_app_with_activity(app, activity);
     let tier = ShellTier::for_chrome_width(area.width);
+    // Quiet chrome background — never paint the full row in phase accent.
     Block::default()
         .style(Style::default().bg(app.ui_theme.footer_bg))
         .render(area, buf);
 
+    // Compact left rail: one accent cell + marker + verb (not a full-width band).
+    let rail_color = phase.color(app);
     let (marker, phase_label) = phase_marker_with_activity(app, phase, activity);
-    let phase_style = Style::default().fg(phase.color(app)).add_modifier(
+    let phase_style = Style::default().fg(rail_color).add_modifier(
         if matches!(phase, ShellPhase::Waiting | ShellPhase::Approval) {
             Modifier::BOLD
         } else {
@@ -144,6 +147,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &mut App) {
         },
     );
     let mut left = vec![
+        Span::styled("▌", phase_style),
         Span::styled(marker, phase_style),
         Span::raw(" "),
         Span::styled(phase_label.clone(), phase_style),
