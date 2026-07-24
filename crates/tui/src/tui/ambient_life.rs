@@ -476,9 +476,10 @@ const LEAD_FISH_LEFT: &str = "<o><";
 /// Jellyfish bell and its swaying tentacle frames (all width-1 ASCII).
 // Dome + lagging tentacle: read as jellyfish, not a parenthetical blob-on-a-string.
 // Keep ASCII-adjacent glyphs that render cleanly in common terminal fonts.
-const JELLY_BELL: &str = "o°";
-// Dome + lagging tentacle: jellyfish, not a parenthetical blob-on-a-string.
-const JELLY_TENTACLE_FRAMES: &[&str] = &["¦", ":", "¦", "."];
+const JELLY_BELL: &str = "o*";
+// Dome + lagging tentacle: jellyfish silhouette in ASCII-safe glyphs so the
+// low-motion / ascii_safe tier still covers ambient life.
+const JELLY_TENTACLE_FRAMES: &[&str] = &["|", ":", "|", "."];
 
 const JELLY_PULSE_MS: u128 = 2_900;
 /// The tentacle repeats the bell pulse this much later.

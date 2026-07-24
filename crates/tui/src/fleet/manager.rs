@@ -3042,8 +3042,16 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn skip_if_process_table_unavailable() -> bool {
+        !crate::fleet::host::process_table_inspection_available()
+    }
+
+    #[cfg(unix)]
     #[test]
     fn separate_manager_interrupt_stops_live_worker_and_stays_terminal() {
+        if skip_if_process_table_unavailable() {
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         let manager = FleetManager::open(tmp.path()).unwrap();
         let controller = FleetManager::open(tmp.path()).unwrap();
@@ -3135,6 +3143,9 @@ sleep 30
     #[cfg(unix)]
     #[test]
     fn live_restart_fences_old_process_and_only_attempt_two_completes() {
+        if skip_if_process_table_unavailable() {
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         let manager = FleetManager::open(tmp.path()).unwrap();
         let controller = FleetManager::open(tmp.path()).unwrap();

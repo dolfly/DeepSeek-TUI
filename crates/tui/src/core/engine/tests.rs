@@ -1175,10 +1175,13 @@ async fn queued_interrupted_turn_cancels_older_goal_continuation_without_third_c
         "the stale synthetic token must not make a third provider call"
     );
     let goal = goal_state.lock().expect("goal lock").snapshot();
-    assert_eq!(goal.status, "paused");
+    // Interrupted ordinary turns cancel stale auto-continuation only; the goal
+    // stays Active so the next user message continues without /goal resume.
+    assert_eq!(goal.status, "active");
     assert_eq!(goal.blocker, None);
-    let prompt = system_prompt_text(session.system_prompt.expect("paused system prompt"));
-    assert!(!prompt.contains("<session_goal>"), "{prompt}");
+    assert_eq!(goal.pause_reason, None);
+    let prompt = system_prompt_text(session.system_prompt.expect("active system prompt"));
+    assert!(prompt.contains("<session_goal>"), "{prompt}");
 
     handle.send(Op::Shutdown).await.expect("shutdown engine");
     run_task.await.expect("engine task");

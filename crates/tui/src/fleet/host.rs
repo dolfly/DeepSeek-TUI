@@ -994,7 +994,7 @@ fn process_table_probe_cell() -> &'static OnceLock<bool> {
 /// Returns whether full process-table inspection (`ps` / `/proc`) works here.
 /// Cached after the first probe so tests and production share one answer.
 #[cfg(unix)]
-fn process_table_inspection_available() -> bool {
+pub(crate) fn process_table_inspection_available() -> bool {
     *process_table_probe_cell().get_or_init(|| match unix_process_ids_uncached() {
         Ok(_) => true,
         Err(err) if process_table_error_is_unavailable(&err) => false,
