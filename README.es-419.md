@@ -1,21 +1,23 @@
-<!-- source: README.md sha256:ff4c58eb428c -->
+<!-- source: README.md sha256:797a23968c31 -->
 # Codewhale
 
-Codewhale es un agente de código para tu terminal. Apúntalo a un modelo —
-DeepSeek, Claude, GPT, Kimi, GLM, más de 30 proveedores alojados, o tu propio
-vLLM/SGLang/Ollama, sin key — y dale una tarea. Lee tu código, edita
-archivos, ejecuta comandos, verifica su trabajo y se detiene cuando la tarea
+Un agente de programación de código abierto para tu terminal — trae tu propio modelo.
+
+Codewhale empezó como una experiencia nativa para DeepSeek. Desde entonces se ha
+convertido en un proyecto impulsado por la comunidad: un harness de programación
+que se adapta a una comunidad internacional en crecimiento y admite tantos
+modelos y proveedores como sea posible — los modelos abiertos primero, alojados
+o locales, sin privilegiar a ninguno.
+
+Le das un proveedor, un modelo y una tarea. Lee tu código, edita archivos,
+ejecuta comandos y verifica su propio trabajo, y se detiene cuando la tarea
 queda lista o te necesita. Cambia de modelo a mitad de tarea con `/model`.
-Usa la TUI para el trabajo interactivo y `codewhale exec` para scripts y CI.
+Trabaja de forma interactiva en la TUI, o ejecuta `codewhale exec` en scripts y
+CI. Está escrito en Rust, con licencia MIT, y corre en tu máquina.
 
-El modo Plan es de solo lectura. Las aprobaciones controlan los comandos
-riesgosos, y el `constitution.json` de un repo puede fijar bloqueos de
-escritura que ni siquiera Full Access puede saltarse. Los fleets registran
-cada paso en un libro mayor, así que `fleet resume` retoma donde te
-detuviste.
-
-Rust, MIT, corre en tu máquina. Nació como `deepseek-tui`; cambió de nombre
-cuando la comunidad necesitó más de un proveedor.
+Siempre estamos buscando personas que contribuyan y formas de mejorar. Si falta
+un modelo o proveedor que usas, o algo se rompe, contárnoslo es una de las cosas
+más útiles que puedes hacer — mira [Contribuir](#contribuir).
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Tiếng Việt](README.vi.md) · [한국어](README.ko-KR.md) · [Português](README.pt-BR.md) · [codewhale.net](https://codewhale.net/) · [Docs](docs) · [Changelog](CHANGELOG.md)
 
@@ -51,6 +53,22 @@ inactivo, `Tab` cicla entre Plan / Act / Operate y `Shift+Tab` cicla la postura
 de permiso Ask / Auto-Review / Full Access. `!` ejecuta un comando de shell por
 la ruta normal de aprobación.
 
+## Qué hace
+
+- **Cualquier modelo, cualquier proveedor.** DeepSeek, Claude, GPT, Kimi, GLM y
+  más de 30 proveedores, además de tu propio vLLM, SGLang u Ollama sin key —
+  todo a través de un solo runtime y un solo conjunto de herramientas. Los
+  presupuestos de contexto y los precios vienen de la ruta real, y un precio
+  desconocido se muestra como desconocido en lugar de $0.
+- **Solo lectura hasta que permitas más.** El modo Plan no cambia archivos, y
+  las aprobaciones controlan los comandos riesgosos. Cuando un sandbox del
+  sistema operativo realmente envuelve un comando, Codewhale lo indica: Seatbelt
+  en macOS cuando está disponible, bubblewrap opcional en Linux. El
+  `constitution.json` de un repo se compila en bloqueos de escritura que ni
+  siquiera Full Access puede saltarse.
+- **Trabajo que puedes retomar.** Un fleet registra cada paso en un libro mayor
+  de solo agregado, así que `fleet resume` retoma donde te detuviste.
+
 ## Para saber más
 
 - [docs/PROVIDERS.md](docs/PROVIDERS.md) — cada ruta de proveedor: alojada,
@@ -67,11 +85,11 @@ del runtime, arquitectura — está en [docs](docs) y en
 
 ## Contribuir
 
-Issues, PRs, pasos de reproducción y solicitudes de features son bienvenidos.
-Cuando un PR no se puede fusionar tal cual, los mantenedores rescatan lo que
-funciona y el autor conserva su crédito — en el commit, en el changelog y en
-[docs/CONTRIBUTORS.md](docs/CONTRIBUTORS.md). ¿Falta un proveedor que usas, o
-algo se rompió en tu máquina? Dínoslo.
+Issues, PRs, pasos de reproducción, logs y solicitudes de features son trabajo
+real del proyecto, y las primeras contribuciones son bienvenidas. Cuando un PR
+no se puede fusionar tal cual, los mantenedores rescatan lo que funciona y el
+autor conserva su crédito — en el commit, en el changelog y en
+[docs/CONTRIBUTORS.md](docs/CONTRIBUTORS.md).
 
 - [Issues abiertos](https://github.com/Hmbown/CodeWhale/issues) — las buenas
   primeras contribuciones viven aquí
