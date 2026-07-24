@@ -1165,36 +1165,39 @@ impl Renderable for ComposerWidget<'_> {
                         if self.app.offline_mode {
                             (Some("↵ offline queue".to_string()), palette::STATUS_WARNING)
                         } else if self.app.mode == crate::tui::app::AppMode::Operate {
+                            // Ctrl+G sends an already-queued item now; with only
+                            // composer text it stashes the draft (#440). Double-↵
+                            // after queueing steers the just-queued task.
                             let label = if queue_count > 0 {
                                 format!(
-                                    "↵ queue task ({} waiting, double-↵ to steer)",
+                                    "↵ queue task ({} waiting) · double-↵/⇧↵ steer · Ctrl+G send queued",
                                     queue_count.saturating_add(1)
                                 )
                             } else {
-                                "↵ queue task (double-↵ to steer)".to_string()
+                                "↵ queue task · double-↵/⇧↵ steer".to_string()
                             };
                             (Some(label), palette::WHALE_INFO)
                         } else {
                             let label = if queue_count > 0 {
                                 format!(
-                                    "↵ queue ({} waiting, double-↵ to steer)",
+                                    "↵ queue ({} waiting) · double-↵/⇧↵ steer · Ctrl+G send queued",
                                     queue_count.saturating_add(1)
                                 )
                             } else {
-                                "↵ queue (double-↵ to steer)".to_string()
+                                "↵ queue · double-↵/⇧↵ steer".to_string()
                             };
                             (Some(label), palette::TEXT_MUTED)
                         }
                     }
-                    // Steer reached via double-tap Enter or Ctrl+Enter override.
+                    // Steer reached via double-tap Enter, Shift+Enter, or Ctrl+Enter.
                     SubmitDisposition::Steer => {
                         (Some("↵ steering".to_string()), palette::WHALE_INFO)
                     }
                     SubmitDisposition::QueueFollowUp => (
                         Some(if self.app.mode == crate::tui::app::AppMode::Operate {
-                            "↵ queued task (double-↵ to steer)".to_string()
+                            "↵ queued task · double-↵/⇧↵ steer · Ctrl+G send queued".to_string()
                         } else {
-                            "↵ queued (double-↵ to steer)".to_string()
+                            "↵ queued · double-↵/⇧↵ steer · Ctrl+G send queued".to_string()
                         }),
                         palette::TEXT_MUTED,
                     ),

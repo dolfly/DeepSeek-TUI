@@ -1503,7 +1503,7 @@ mod tests {
     }
 
     /// Errors are sticky: they outlive the informational TTL window and stay
-    /// until their own resolution window passes.
+    /// until their own resolution window passes, then expire on their own.
     #[test]
     fn footer_errors_outlive_informational_acknowledgements() {
         let mut app = test_app();
@@ -1513,6 +1513,10 @@ mod tests {
         assert!(fresh.contains("failed"), "error notice missing: {fresh}");
 
         if let Some(sticky) = app.sticky_status.as_mut() {
+            assert_eq!(
+                sticky.ttl_ms,
+                Some(crate::tui::app::App::STICKY_ERROR_TTL_MS)
+            );
             sticky.created_at = Instant::now() - Duration::from_secs(6);
         } else {
             panic!("an error must be promoted to the sticky slot");
@@ -1521,6 +1525,32 @@ mod tests {
         assert!(
             held.contains("failed"),
             "errors must hold past the informational window: {held}"
+        );
+
+        if let Some(sticky) = app.sticky_status.as_mut() {
+            sticky.created_at = Instant::now()
+                - Duration::from_millis(crate::tui::app::App::STICKY_ERROR_TTL_MS + 1);
+        }
+        let expired = footer_text(&mut app);
+        assert!(
+            !expired.contains("failed"),
+            "sticky errors must expire after their TTL: {expired}"
+        );
+    }
+
+    #[test]
+    fn sticky_error_clears_when_composer_gets_input() {
+        let mut app = test_app();
+        app.set_sticky_status(
+            "workflow failed: script error",
+            crate::tui::app::StatusToastLevel::Error,
+            None,
+        );
+        assert!(app.sticky_status.is_some());
+        app.insert_char('x');
+        assert!(
+            app.sticky_status.is_none(),
+            "composer activity must dismiss sticky error chrome"
         );
     }
 

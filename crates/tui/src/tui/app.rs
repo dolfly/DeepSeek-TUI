@@ -5325,18 +5325,46 @@ impl App {
         }
     }
 
+    /// Default lifetime for sticky error toasts. Long enough to read, short
+    /// enough that a failed workflow does not permanently occupy footer chrome.
+    pub const STICKY_ERROR_TTL_MS: u64 = 8_000;
+
     pub fn set_sticky_status(
         &mut self,
         text: impl Into<String>,
         level: StatusToastLevel,
         ttl_ms: Option<u64>,
     ) {
+        // Cap sticky errors so a missing TTL never becomes permanent chrome.
+        // Explicit shorter TTLs still win; longer/None fall back to the default.
+        let ttl_ms = match level {
+            StatusToastLevel::Error => Some(
+                ttl_ms
+                    .unwrap_or(Self::STICKY_ERROR_TTL_MS)
+                    .min(Self::STICKY_ERROR_TTL_MS),
+            ),
+            _ => ttl_ms,
+        };
         self.sticky_status = Some(StatusToast::new(text, level, ttl_ms));
         self.needs_redraw = true;
     }
 
     pub fn clear_sticky_status(&mut self) {
-        self.sticky_status = None;
+        if self.sticky_status.take().is_some() {
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Drop sticky error chrome when the user resumes typing so a prior
+    /// workflow/provider failure does not linger over the next draft.
+    pub fn acknowledge_sticky_on_composer_activity(&mut self) {
+        if self
+            .sticky_status
+            .as_ref()
+            .is_some_and(|toast| matches!(toast.level, StatusToastLevel::Error))
+        {
+            self.clear_sticky_status();
+        }
     }
 
     pub fn set_sidebar_focus(&mut self, focus: SidebarFocus) {
@@ -5366,7 +5394,7 @@ impl App {
             || has("aborted")
             || has("critical")
         {
-            return (StatusToastLevel::Error, Some(15_000), true);
+            return (StatusToastLevel::Error, Some(Self::STICKY_ERROR_TTL_MS), true);
         }
         // A success keyword under a negation ("not saved", "no longer
         // found", "could not enable") is a failure the coarse keyword match
@@ -5844,6 +5872,7 @@ impl App {
     }
 
     pub fn insert_char(&mut self, c: char) {
+        self.acknowledge_sticky_on_composer_activity();
         self.clear_input_history_navigation();
         self.auto_expand_oversized_paste();
         self.delete_selection();
@@ -7004,6 +7033,10 @@ impl App {
     /// Enter within 500 ms triggers Steer (interrupt the current turn to
     /// inject the new instruction immediately). When idle, Enter submits
     /// immediately.
+    ///
+    /// The first Enter clears the composer, so the UI path must also call
+    /// [`Self::take_queued_for_double_tap_steer`] on an empty second Enter to
+    /// escalate the just-queued message — otherwise double-tap never fires.
     #[must_use]
     pub fn enter_with_double_tap(&mut self) -> Option<SubmitDisposition> {
         let disposition = self.decide_submit_disposition();
@@ -7023,6 +7056,30 @@ impl App {
                 Some(other)
             }
         }
+    }
+
+    /// True when a second bare Enter should escalate the most recent queued
+    /// follow-up into a live steer (composer already emptied by the first tap).
+    #[must_use]
+    pub fn can_double_tap_steer_queued(&self) -> bool {
+        if self.offline_mode || !self.is_loading || self.dispatch_in_flight {
+            return false;
+        }
+        if self.queued_messages.is_empty() {
+            return false;
+        }
+        self.last_enter_instant
+            .is_some_and(|instant| instant.elapsed() < Duration::from_millis(500))
+    }
+
+    /// Pop the most recently queued message when a double-tap steer window is
+    /// still open. Clears the window so a third Enter does not re-steer.
+    pub fn take_queued_for_double_tap_steer(&mut self) -> Option<QueuedMessage> {
+        if !self.can_double_tap_steer_queued() {
+            return None;
+        }
+        self.last_enter_instant = None;
+        self.queued_messages.pop_back()
     }
 
     /// Mark the in-flight streaming Assistant cell as interrupted: prepend
