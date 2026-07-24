@@ -1016,7 +1016,9 @@ impl HotbarAction for AppHotbarAction {
                     app.status_message = Some("Compaction is already running.".to_string());
                     return Ok(HotbarDispatch::Handled);
                 }
-                Ok(HotbarDispatch::AppAction(AppAction::CompactContext))
+                Ok(HotbarDispatch::AppAction(AppAction::CompactContext {
+                    focus: None,
+                }))
             }
             AppHotbarKind::Mode(mode) => {
                 let changed = app.set_mode(mode);
@@ -1855,7 +1857,8 @@ mod tests {
         assert_eq!(compact.category, HotbarActionCategory::Slash);
         assert_eq!(compact.source_id, "command:compact");
         assert_eq!(compact.display_name, "/compact");
-        assert_eq!(compact.args, HotbarArgsBehavior::None);
+        // `/compact [focus]` takes an optional summary focus (2026-07-23).
+        assert_eq!(compact.args, HotbarArgsBehavior::Optional);
         assert_eq!(compact.safety, HotbarSafetyClass::ExistingCommand);
         assert_eq!(compact.recommendation, HotbarRecommendation::Eligible);
 
@@ -2395,7 +2398,7 @@ mod tests {
         assert!(!compact.is_active(&app));
         assert_eq!(
             compact.dispatch(&mut app).expect("dispatch compact"),
-            HotbarDispatch::AppAction(AppAction::CompactContext)
+            HotbarDispatch::AppAction(AppAction::CompactContext { focus: None })
         );
         app.is_compacting = true;
         assert!(compact.is_active(&app));

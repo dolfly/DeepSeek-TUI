@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `/compact [focus]`: the manual compaction command now accepts an
+  optional focus argument that is injected into the summary prompt, and
+  the compaction summary itself becomes a structured nine-section
+  successor briefing (primary intent, key concepts, files and code,
+  errors and fixes, problem solving, user messages, pending tasks,
+  current work, next step) that carries earlier compaction summaries
+  forward and explicitly forbids tool use — replacing the free-form
+  "under N words" instruction. Codewhale's pin/working-set and
+  V4 prefix-cache-aligned machinery are unchanged.
+
 - Saved workflows become slash commands: `*.workflow.js` files under
   `<workspace>/.codewhale/workflows/` and `~/.codewhale/workflows/` are
   discovered as `/name` commands that accept custom arguments (forwarded

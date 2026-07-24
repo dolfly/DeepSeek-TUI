@@ -33,6 +33,10 @@ pub struct CompactionConfig {
     /// callers that have not resolved a provider route yet.
     pub effective_context_window: Option<u32>,
     pub cache_summary: bool,
+    /// Optional user-supplied focus for a manual `/compact <focus>`: injected
+    /// into the successor-brief prompt so the summary weights what the user
+    /// said matters. `None` for automatic compaction.
+    pub focus: Option<String>,
 }
 
 impl Default for CompactionConfig {
@@ -58,6 +62,7 @@ impl Default for CompactionConfig {
             model: DEFAULT_TEXT_MODEL.to_string(),
             effective_context_window: None,
             cache_summary: true,
+            focus: None,
         }
     }
 }
@@ -1192,6 +1197,7 @@ pub async fn compact_messages(
         &to_summarize,
         &config.model,
         config.effective_context_window,
+        config.focus.as_deref(),
     )
     .await?;
 
@@ -1246,14 +1252,15 @@ async fn create_summary(
     messages: &[Message],
     model: &str,
     effective_context_window: Option<u32>,
+    focus: Option<&str>,
 ) -> Result<String> {
     let limits = summary_input_limits_for_model(model, effective_context_window);
     let used_cache_aligned =
         should_use_cache_aligned_summary(model, effective_context_window, messages);
     let request = if used_cache_aligned {
-        build_cache_aligned_summary_request(model, messages, limits)
+        build_cache_aligned_summary_request(model, messages, limits, focus)
     } else {
-        build_formatted_summary_request(model, messages, limits)
+        build_formatted_summary_request(model, messages, limits, focus)
     };
 
     let mut telemetry_cache_aligned = used_cache_aligned;
@@ -1271,7 +1278,7 @@ async fn create_summary(
                  bounded formatted summary input"
             ));
             telemetry_cache_aligned = false;
-            let fallback_request = build_formatted_summary_request(model, messages, limits);
+            let fallback_request = build_formatted_summary_request(model, messages, limits, focus);
             client.create_message(fallback_request).await?
         }
         Err(err) => return Err(err),
@@ -1425,26 +1432,50 @@ fn should_use_cache_aligned_summary(
     estimate_tokens(messages).saturating_add(summary_prompt_tokens) <= budget
 }
 
-fn summary_instruction(word_limit: usize) -> String {
-    format!(
-        "Summarize the conversation above in a concise but comprehensive way. \
-         Preserve key information, decisions made, exact file paths, commands, \
-         errors, and tool-result facts needed to continue the work. \
-         Tool outputs may be abbreviated only when they are repetitive. \
-         Keep it under {word_limit} words."
-    )
+/// Structured successor brief (2026-07-23 compaction cutover): the summary
+/// is written for the agent that resumes after compaction, in nine fixed
+/// sections, instead of a free-form "concise but comprehensive" paragraph.
+/// An optional user focus from `/compact <focus>` is appended verbatim.
+fn summary_instruction(word_limit: usize, focus: Option<&str>) -> String {
+    let mut instruction = format!(
+        "Produce a successor briefing for the agent that will continue this session after \
+         compaction. Structure it with exactly these numbered sections (write \"None\" when a \
+         section is empty):\n\
+         1. Primary request and intent — what the user is ultimately asking for, in their terms.\n\
+         2. Key technical concepts — systems, APIs, and domain facts the successor must know.\n\
+         3. Files and code sections — exact paths, with the important identifiers or snippets per file.\n\
+         4. Errors and fixes — each error hit, its cause, and how (or whether) it was fixed.\n\
+         5. Problem solving — approaches tried, decisions made, and why alternatives were rejected.\n\
+         6. User messages — every non-tool user instruction, condensed but none omitted.\n\
+         7. Pending tasks — work explicitly requested but not yet done.\n\
+         8. Current work — precisely what was in flight when compaction hit.\n\
+         9. Next step — only if one is directly implied; ground it in a short verbatim quote from \
+         the most recent work.\n\
+         If the conversation already contains an earlier compaction summary, treat it as \
+         authoritative for the history it covers and carry its facts forward. Preserve exact \
+         file paths, commands, and tool-result facts; abbreviate tool outputs only when they \
+         are repetitive. Do not call tools. Keep the whole briefing under {word_limit} words."
+    );
+    if let Some(focus) = focus.map(str::trim).filter(|focus| !focus.is_empty()) {
+        let _ = write!(
+            instruction,
+            "\n\nThe user asked this compaction to focus on: {focus}"
+        );
+    }
+    instruction
 }
 
 fn build_cache_aligned_summary_request(
     model: &str,
     messages: &[Message],
     limits: SummaryInputLimits,
+    focus: Option<&str>,
 ) -> MessageRequest {
     let mut request_messages = messages.to_vec();
     request_messages.push(Message {
         role: "user".to_string(),
         content: vec![ContentBlock::Text {
-            text: summary_instruction(limits.word_limit),
+            text: summary_instruction(limits.word_limit, focus),
             cache_control: None,
         }],
     });
@@ -1469,6 +1500,7 @@ fn build_formatted_summary_request(
     model: &str,
     messages: &[Message],
     limits: SummaryInputLimits,
+    focus: Option<&str>,
 ) -> MessageRequest {
     // Format messages for summarization
     let mut conversation_text = String::new();
@@ -1520,7 +1552,7 @@ fn build_formatted_summary_request(
             content: vec![ContentBlock::Text {
                 text: format!(
                     "{}\n\n---\n\n{conversation_text}",
-                    summary_instruction(limits.word_limit)
+                    summary_instruction(limits.word_limit, focus)
                 ),
                 cache_control: None,
             }],
@@ -2010,6 +2042,36 @@ mod tests {
     }
 
     #[test]
+    fn summary_instruction_is_a_structured_successor_brief_with_optional_focus() {
+        let brief = summary_instruction(500, None);
+        for section in [
+            "1. Primary request and intent",
+            "2. Key technical concepts",
+            "3. Files and code sections",
+            "4. Errors and fixes",
+            "5. Problem solving",
+            "6. User messages",
+            "7. Pending tasks",
+            "8. Current work",
+            "9. Next step",
+        ] {
+            assert!(
+                brief.contains(section),
+                "missing section {section:?}: {brief}"
+            );
+        }
+        assert!(brief.contains("under 500 words"), "{brief}");
+        assert!(brief.contains("Do not call tools"), "{brief}");
+        assert!(brief.contains("earlier compaction summary"), "{brief}");
+        assert!(!brief.contains("focus on:"), "{brief}");
+
+        let focused = summary_instruction(500, Some("  the auth refactor  "));
+        assert!(focused.contains("focus on: the auth refactor"), "{focused}");
+        let blank = summary_instruction(500, Some("   "));
+        assert!(!blank.contains("focus on:"), "{blank}");
+    }
+
+    #[test]
     fn formatted_summary_request_bounds_large_input() {
         let messages = (0..90)
             .map(|idx| {
@@ -2021,7 +2083,7 @@ mod tests {
             .collect::<Vec<_>>();
         let limits = summary_input_limits_for_model("deepseek-v4-pro", None);
 
-        let request = build_formatted_summary_request("deepseek-v4-pro", &messages, limits);
+        let request = build_formatted_summary_request("deepseek-v4-pro", &messages, limits, None);
 
         assert_eq!(request.messages.len(), 1);
         let ContentBlock::Text { text, .. } = &request.messages[0].content[0] else {
@@ -2038,7 +2100,8 @@ mod tests {
             msg("assistant", "I will inspect the file."),
         ];
         let limits = summary_input_limits_for_model("deepseek-v4-pro", None);
-        let request = build_cache_aligned_summary_request("deepseek-v4-pro", &messages, limits);
+        let request =
+            build_cache_aligned_summary_request("deepseek-v4-pro", &messages, limits, None);
 
         assert_eq!(request.system, None);
         assert_eq!(&request.messages[..messages.len()], &messages[..]);
@@ -2047,7 +2110,7 @@ mod tests {
         assert_eq!(last.role, "user");
         assert!(matches!(
             &last.content[..],
-            [ContentBlock::Text { text, .. }] if text.contains("conversation above")
+            [ContentBlock::Text { text, .. }] if text.contains("successor briefing")
         ));
     }
 

@@ -10916,11 +10916,12 @@ async fn apply_command_result(
             AppAction::OpenLiveTranscript => {
                 open_live_transcript_overlay(app);
             }
-            AppAction::CompactContext => {
+            AppAction::CompactContext { focus } => {
                 app.status_message = Some("Compacting context...".to_string());
                 match validated_app_runtime_route(app, config) {
                     Ok(route) => {
-                        let compaction = compaction_for_validated_route(app, &route);
+                        let mut compaction = compaction_for_validated_route(app, &route);
+                        compaction.focus = focus.clone();
                         let _ = engine_handle
                             .send(Op::CompactContext {
                                 route: Box::new(route.into_resolved()),

@@ -7882,7 +7882,11 @@ pub enum AppAction {
     /// Open the live transcript overlay through a terminal-safe command path.
     OpenLiveTranscript,
     OpenContextInspector,
-    CompactContext,
+    CompactContext {
+        /// Optional user focus from `/compact <focus>`, forwarded into the
+        /// successor-brief summary prompt.
+        focus: Option<String>,
+    },
     PurgeContext,
     TaskAdd {
         prompt: String,
