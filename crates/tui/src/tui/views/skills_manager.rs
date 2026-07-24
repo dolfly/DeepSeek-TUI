@@ -156,7 +156,7 @@ impl SkillsManagerView {
         };
         let snap = scan_with_configured(
             &app.workspace,
-            dirs::home_dir().as_deref(),
+            crate::config::effective_home_dir().as_deref(),
             Some(&app.skills_dir),
             self.mode.audit_mode(),
             None,
@@ -508,7 +508,7 @@ impl SkillsManagerView {
 fn scan_snapshot(app: &App, mode: ManagerMode) -> SkillAuditSnapshot {
     scan_with_configured(
         &app.workspace,
-        dirs::home_dir().as_deref(),
+        crate::config::effective_home_dir().as_deref(),
         Some(&app.skills_dir),
         mode.audit_mode(),
         None,

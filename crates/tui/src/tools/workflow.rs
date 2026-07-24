@@ -1739,7 +1739,7 @@ fn read_workflow_source_path(
         // alongside the workspace: `~/.codewhale/workflows/*.workflow.js`
         // definitions surface as slash commands and must launch from any
         // workspace without trust_mode.
-        let home_store = dirs::home_dir()
+        let home_store = crate::config::effective_home_dir()
             .map(|home| home.join(".codewhale").join("workflows"))
             .and_then(|dir| dir.canonicalize().ok());
         let inside_home_store = home_store
@@ -3987,6 +3987,7 @@ mod tests {
         let store = home.join(".codewhale").join("workflows");
         std::fs::create_dir_all(&store).expect("store");
         let _home_guard = crate::test_support::EnvVarGuard::set("HOME", &home);
+        let _userprofile_guard = crate::test_support::EnvVarGuard::set("USERPROFILE", &home);
 
         let saved = store.join("triage.workflow.js");
         std::fs::write(&saved, "phase('scan');\n").expect("write saved workflow");
